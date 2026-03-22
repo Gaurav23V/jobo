@@ -10,9 +10,9 @@ Base = declarative_base()
 
 @dataclass
 class Job:
-    company_name: str
-    job_title: str
     job_url: str
+    company_name: Optional[str] = None
+    job_title: Optional[str] = None
     location: Optional[str] = None
     applied: bool = False
     referred_json: str = "[]"
@@ -46,8 +46,8 @@ class JobModel(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_name = Column(String, nullable=False)
-    job_title = Column(String, nullable=False)
+    company_name = Column(String, nullable=True)
+    job_title = Column(String, nullable=True)
     location = Column(String, nullable=True)
     applied = Column(Boolean, nullable=False, default=False)
     referred_json = Column(Text, nullable=False, default="[]")
