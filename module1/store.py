@@ -14,13 +14,7 @@ def upsert_job(session, job: Job) -> tuple[Job, bool]:
     Returns (job, created) where created is True if new, False if updated.
     """
     existing = (
-        session.query(JobModel)
-        .filter(
-            JobModel.company_name == job.company_name,
-            JobModel.job_title == job.job_title,
-            JobModel.job_url == job.job_url,
-        )
-        .first()
+        session.query(JobModel).filter(JobModel.job_url == job.job_url).first()
     )
 
     if existing:
