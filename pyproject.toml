@@ -1,0 +1,28 @@
+[project]
+name = "jobo"
+version = "0.1.0"
+description = "Job Application Automation System"
+requires-python = ">=3.11"
+dependencies = [
+    "click",
+    "google-api-python-client",
+    "google-auth-httplib2",
+    "google-auth-oauthlib",
+    "sqlalchemy",
+    "beautifulsoup4",
+    "lxml",
+    "python-dateutil",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+jobo = "main:cli"
+
+[tool.ruff]
+line-length = 88

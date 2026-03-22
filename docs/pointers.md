@@ -1,0 +1,2 @@
+- Always give high priority to emails we get from individuals offering a role, analyze it and judge if it is really a job call or just fake scam
+- Explore platforms like mercor, micro1
