@@ -121,17 +121,45 @@ def _linkedin_description_text(page: Page) -> Optional[str]:
     return None
 
 
+def _linkedin_title_from_early_main_paragraphs(page: Page) -> Optional[str]:
+    """Unverified postings use a plain <p> for the title (no Verified badge); hashed classes rotate."""
+    try:
+        ps = page.locator("main p")
+        n = min(ps.count(), 15)
+        for i in range(n):
+            try:
+                raw = ps.nth(i).inner_text(timeout=2_000)
+            except Exception:
+                continue
+            t = re.sub(r"\s+", " ", raw).strip()
+            if not t or len(t) < 3 or len(t) > 200:
+                continue
+            if t.lower().startswith("http"):
+                continue
+            # Skip LinkedIn metadata line: "City · 3 days ago · N applicants"
+            if "·" in t and re.search(r"ago|applicant", t, re.IGNORECASE):
+                continue
+            return t
+    except Exception:
+        pass
+    return None
+
+
 def _linkedin_title_text(page: Page) -> Optional[str]:
-    """Prefer new job view (verified badge row), then legacy selectors."""
-    return _first_text(
+    """Verified row first; then legacy/h1; then plain top-card <p> (unverified listings)."""
+    t = _first_text(
         page,
         [
             'p:has([aria-label="Verified job"])',
+            "main h1",
             "h1",
             ".job-details-jobs-unified-top-card__job-title",
             "[data-test-job-card-title]",
         ],
     )
+    if t:
+        return t
+    return _linkedin_title_from_early_main_paragraphs(page)
 
 
 def _linkedin_company_text(page: Page) -> Optional[str]:
