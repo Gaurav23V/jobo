@@ -42,10 +42,7 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
     result = EnrichResult()
     jobs = list_jobs_for_enrichment(session, force=force)
     logger.info(
-        "Enrich: %d job(s) to process (force=%s, dry_run=%s)",
-        len(jobs),
-        force,
-        dry_run,
+        f"Enrich: {len(jobs)} job(s) to process (force={force}, dry_run={dry_run})",
     )
 
     if not jobs:
@@ -56,9 +53,7 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
             enrich_delay_jitter()
             result.attempted += 1
             logger.info(
-                "job_id=%s browser extraction starting url=%s",
-                job.id,
-                job.job_url,
+                f"job_id={job.id} browser extraction starting url={job.job_url}",
             )
             ext = extract_linkedin_job(context, job.job_url)
 
@@ -67,7 +62,7 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
                 logger.warning(msg)
                 result.failed += 1
                 if dry_run:
-                    logger.info("[dry-run] Would persist scrape failure: %s", ext.error)
+                    logger.info(f"[dry-run] Would persist scrape failure: {ext.error}")
                 else:
                     save_enrichment_result(
                         session,
@@ -78,11 +73,8 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
                 continue
 
             logger.info(
-                "job_id=%s browser extraction done url=%s title=%r company=%r",
-                job.id,
-                job.job_url,
-                ext.title,
-                ext.company,
+                f"job_id={job.id} browser extraction done url={job.job_url} "
+                f"title={ext.title!r} company={ext.company!r}",
             )
 
             user = (
@@ -91,10 +83,8 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
                 + ext.to_llm_blob()
             )
             logger.info(
-                "job_id=%s Ollama enrichment starting url=%s model=%s",
-                job.id,
-                job.job_url,
-                get_ollama_model(),
+                f"job_id={job.id} Ollama enrichment starting url={job.job_url} "
+                f"model={get_ollama_model()}",
             )
             enrichment, llm_err, raw = generate_json_enrichment_with_retry(
                 SYSTEM_PROMPT, user
@@ -106,13 +96,10 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
                     f"job_id={job.id} url={job.job_url} llm: {llm_err}"
                 )
                 logger.warning(
-                    "job_id=%s Ollama failed url=%s — %s",
-                    job.id,
-                    job.job_url,
-                    llm_err,
+                    f"job_id={job.id} Ollama failed url={job.job_url} — {llm_err}",
                 )
                 if dry_run:
-                    logger.info("[dry-run] Would persist LLM failure: %s", llm_err)
+                    logger.info(f"[dry-run] Would persist LLM failure: {llm_err}")
                 else:
                     save_enrichment_result(
                         session,
@@ -125,11 +112,9 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
 
             if dry_run:
                 logger.info(
-                    "[dry-run] Would persist job_id=%s url=%s model=%s enrichment=%s",
-                    job.id,
-                    job.job_url,
-                    get_ollama_model(),
-                    enrichment.model_dump() if enrichment else None,
+                    f"[dry-run] Would persist job_id={job.id} url={job.job_url} "
+                    f"model={get_ollama_model()} enrichment="
+                    f"{enrichment.model_dump() if enrichment else None}",
                 )
                 result.succeeded += 1
             else:
@@ -141,9 +126,7 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
                 )
                 result.succeeded += 1
             logger.info(
-                "job_id=%s enrich finished ok url=%s",
-                job.id,
-                job.job_url,
+                f"job_id={job.id} enrich finished ok url={job.job_url}",
             )
 
     return result

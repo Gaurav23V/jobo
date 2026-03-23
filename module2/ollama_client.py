@@ -50,10 +50,7 @@ def generate_json_enrichment(
             if not r.is_success:
                 preview = (r.text or "")[:800].replace("\n", " ")
                 logger.warning(
-                    "Ollama HTTP %s %s — %s",
-                    r.status_code,
-                    url,
-                    preview or "(empty body)",
+                    f"Ollama HTTP {r.status_code} {url} — {preview or '(empty body)'}",
                 )
                 return (
                     None,
@@ -65,7 +62,7 @@ def generate_json_enrichment(
             except json.JSONDecodeError as e:
                 return None, f"Ollama invalid JSON body: {e}", r.text or ""
     except httpx.HTTPError as e:
-        logger.warning("Ollama request failed: %s", e)
+        logger.warning(f"Ollama request failed: {e}")
         return None, f"Ollama HTTP error: {e}", ""
 
     raw = (payload.get("response") or "").strip()

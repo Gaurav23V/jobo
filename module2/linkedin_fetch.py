@@ -224,7 +224,7 @@ def extract_linkedin_job(context: BrowserContext, job_url: str) -> ExtractedPage
             description=description,
         )
     except Exception as e:
-        logger.exception("LinkedIn fetch failed for %s", job_url)
+        logger.exception(f"LinkedIn fetch failed for {job_url}")
         return ExtractedPageText(error=str(e))
     finally:
         page.close()
@@ -249,21 +249,21 @@ def playwright_browser_context() -> Iterator[BrowserContext]:
         try:
             if cdp:
                 used_cdp = True
-                logger.info("Playwright: connect_over_cdp(%s)", cdp)
+                logger.info(f"Playwright: connect_over_cdp({cdp})")
                 browser = p.chromium.connect_over_cdp(cdp)
                 if browser.contexts:
                     context = browser.contexts[0]
                 else:
                     context = browser.new_context()
             elif user_data:
-                logger.info("Playwright: launch_persistent_context(%s)", user_data)
+                logger.info(f"Playwright: launch_persistent_context({user_data})")
                 context = p.chromium.launch_persistent_context(
                     user_data,
                     channel="chromium",
                     headless=headless,
                 )
             else:
-                logger.info("Playwright: vanilla chromium.launch(headless=%s)", headless)
+                logger.info(f"Playwright: vanilla chromium.launch(headless={headless})")
                 browser = p.chromium.launch(headless=headless)
                 context = browser.new_context()
                 maybe_perform_linkedin_login(context)
