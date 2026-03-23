@@ -47,12 +47,26 @@ def generate_json_enrichment(
     try:
         with httpx.Client(timeout=timeout) as client:
             r = client.post(url, json=body)
-            r.raise_for_status()
-            payload = r.json()
+            if not r.is_success:
+                preview = (r.text or "")[:800].replace("\n", " ")
+                logger.warning(
+                    "Ollama HTTP %s %s — %s",
+                    r.status_code,
+                    url,
+                    preview or "(empty body)",
+                )
+                return (
+                    None,
+                    f"Ollama HTTP {r.status_code}: {preview[:200]}",
+                    r.text or "",
+                )
+            try:
+                payload = r.json()
+            except json.JSONDecodeError as e:
+                return None, f"Ollama invalid JSON body: {e}", r.text or ""
     except httpx.HTTPError as e:
+        logger.warning("Ollama request failed: %s", e)
         return None, f"Ollama HTTP error: {e}", ""
-    except json.JSONDecodeError as e:
-        return None, f"Ollama invalid JSON body: {e}", ""
 
     raw = (payload.get("response") or "").strip()
     if not raw:

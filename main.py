@@ -75,6 +75,9 @@ def enrich(quiet: bool, dry_run: bool, force: bool):
             level=logging.INFO,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
+        # Per-request "HTTP Request ... 200 OK" is noise; real failures surface via module2 logs.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     try:
         init_db()

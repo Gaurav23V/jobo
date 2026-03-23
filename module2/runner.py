@@ -55,10 +55,15 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
         for job in jobs:
             enrich_delay_jitter()
             result.attempted += 1
+            logger.info(
+                "job_id=%s browser extraction starting url=%s",
+                job.id,
+                job.job_url,
+            )
             ext = extract_linkedin_job(context, job.job_url)
 
             if ext.error:
-                msg = f"job_id={job.id} scrape: {ext.error}"
+                msg = f"job_id={job.id} url={job.job_url} scrape: {ext.error}"
                 logger.warning(msg)
                 result.failed += 1
                 if dry_run:
@@ -72,10 +77,24 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
                     )
                 continue
 
+            logger.info(
+                "job_id=%s browser extraction done url=%s title=%r company=%r",
+                job.id,
+                job.job_url,
+                ext.title,
+                ext.company,
+            )
+
             user = (
                 "Transform the following job posting text into JSON as instructed. "
                 "Put the entire Description body into job_metadata without dropping content.\n\n"
                 + ext.to_llm_blob()
+            )
+            logger.info(
+                "job_id=%s Ollama enrichment starting url=%s model=%s",
+                job.id,
+                job.job_url,
+                get_ollama_model(),
             )
             enrichment, llm_err, raw = generate_json_enrichment_with_retry(
                 SYSTEM_PROMPT, user
@@ -83,7 +102,15 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
 
             if llm_err:
                 result.failed += 1
-                result.errors.append(f"job_id={job.id} llm: {llm_err}")
+                result.errors.append(
+                    f"job_id={job.id} url={job.job_url} llm: {llm_err}"
+                )
+                logger.warning(
+                    "job_id=%s Ollama failed url=%s — %s",
+                    job.id,
+                    job.job_url,
+                    llm_err,
+                )
                 if dry_run:
                     logger.info("[dry-run] Would persist LLM failure: %s", llm_err)
                 else:
@@ -98,8 +125,9 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
 
             if dry_run:
                 logger.info(
-                    "[dry-run] Would persist job_id=%s model=%s enrichment=%s",
+                    "[dry-run] Would persist job_id=%s url=%s model=%s enrichment=%s",
                     job.id,
+                    job.job_url,
                     get_ollama_model(),
                     enrichment.model_dump() if enrichment else None,
                 )
@@ -112,5 +140,10 @@ def run_enrich(session: Session, *, dry_run: bool = False, force: bool = False) 
                     model_name=get_ollama_model(),
                 )
                 result.succeeded += 1
+            logger.info(
+                "job_id=%s enrich finished ok url=%s",
+                job.id,
+                job.job_url,
+            )
 
     return result
