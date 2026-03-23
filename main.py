@@ -100,5 +100,14 @@ def enrich(quiet: bool, dry_run: bool, force: bool):
         raise click.Abort()
 
 
+@cli.command("all")
+@click.pass_context
+def run_all(ctx: click.Context):
+    """Run collector then enrich, each with its default options."""
+
+    ctx.invoke(collector, hours=24, dry_run=False, quiet=False)
+    ctx.invoke(enrich, dry_run=False, force=False, quiet=False)
+
+
 if __name__ == "__main__":
     cli()
