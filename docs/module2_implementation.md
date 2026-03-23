@@ -6,7 +6,7 @@
 ## Implementation status (shipped)
 
 - **CLI:** `python main.py enrich` or `jobo enrich` after `pip install -e .`. Flags: `--dry-run`, `--force`, `--quiet`.
-- **Code:** Package `module2/` — `query.py` (pending rows), `linkedin_fetch.py` (Playwright + text extraction), `ollama_client.py` (HTTP `POST /api/generate` with `format: json` + one retry on bad JSON), `enrichment_schema.py` (Pydantic), `persist.py` (merge `metadata_json.module2`, columns, `module2_attempted`), `runner.py` (orchestration).
+- **Code:** Package `module2/` — `query.py` (pending rows), `linkedin_fetch.py` (Playwright + text extraction), `ollama_client.py` (HTTP `POST /api/generate` with `format: json` + one retry on bad JSON), `enrichment_schema.py` (Pydantic), `persist.py` (job-only `metadata_json` = LLM `job_metadata`; columns `module2_enriched_at`, `module2_model`, `module2_last_error`; `module2_attempted`), `runner.py` (orchestration).
 - **Setup:** Install browsers once: **`playwright install chromium`** (or `playwright install`). Configure `.env` using `.env.example` at repo root (`OLLAMA_*`, `JOBO_PLAYWRIGHT_*`, optional `JOBO_LINKEDIN_*`, optional `JOBO_ENRICH_DELAY_MS_MAX`).
 - **Verification:** Manual only — run `collector` then `enrich`; use `--dry-run` to exercise Playwright + Ollama without DB writes.
 
@@ -108,7 +108,7 @@ Using **company name, job id, or similar** from Module 1 to skip opening some UR
 
 ## CLI / integration
 
-- Mirror Module 1: a **Click** subcommand on `main.py` named **`enrich`** that opens a DB session, runs the pipeline over **all** rows with `module2_attempted` false, and prints a short summary (**processed**, **succeeded**, **failed**, plus error lines when present).
+- Mirror Module 1: a **Click** subcommand on `main.py` named **`enrich`** that opens a DB session, runs the pipeline over **all** rows with `module2_attempted` false, and prints a short summary (**attempted**, **succeeded**, **failed**, plus error lines when present).
 - **`--dry-run`:** Run the **full** pipeline (Playwright, extraction, Ollama, validation) but **do not** write to the database—no column updates, no `module2_attempted` changes, no commits. Log or print what would have been saved. Still uses LinkedIn and Ollama (not a lightweight “preview only” mode).
 - **`--force`:** Re-run even when `module2_attempted` is true (re-process all rows).
 - **`--quiet`:** Optional; same idea as `collector` (less log noise).

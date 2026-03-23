@@ -35,9 +35,30 @@ def _ensure_jobs_module2_attempted_column() -> None:
         )
 
 
+def _ensure_jobs_module2_enrichment_columns() -> None:
+    """Add Module 2 provenance columns (enriched_at, model, last_error)."""
+    inspector = inspect(engine)
+    if not inspector.has_table("jobs"):
+        return
+    columns = {c["name"] for c in inspector.get_columns("jobs")}
+    alters: list[str] = []
+    if "module2_enriched_at" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module2_enriched_at DATETIME")
+    if "module2_model" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module2_model VARCHAR")
+    if "module2_last_error" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module2_last_error TEXT")
+    if not alters:
+        return
+    with engine.begin() as conn:
+        for stmt in alters:
+            conn.execute(text(stmt))
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_jobs_module2_attempted_column()
+    _ensure_jobs_module2_enrichment_columns()
 
 
 def get_session() -> Session:

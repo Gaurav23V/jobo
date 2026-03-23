@@ -11,6 +11,18 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
 logger = logging.getLogger(__name__)
 
+# Node 22+ emits DEP0169 for legacy `url.parse()`; Playwright's Node driver still hits that
+# path. Child processes inherit NODE_OPTIONS (see node --disable-warning=).
+_NODE_DEP0169_FLAG = "--disable-warning=DEP0169"
+
+
+def _suppress_node_dep0169_for_playwright() -> None:
+    cur = os.environ.get("NODE_OPTIONS", "").strip()
+    parts = cur.split() if cur else []
+    if _NODE_DEP0169_FLAG in parts:
+        return
+    os.environ["NODE_OPTIONS"] = " ".join([*parts, _NODE_DEP0169_FLAG])
+
 
 @dataclass
 class ExtractedPageText:
@@ -44,20 +56,6 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if v in ("0", "false", "no", "off"):
         return False
     return default
-
-
-def _maybe_jitter_between_jobs() -> None:
-    raw = os.environ.get("JOBO_ENRICH_DELAY_MS_MAX", "").strip()
-    if not raw:
-        return
-    try:
-        ms_max = int(raw)
-    except ValueError:
-        return
-    if ms_max <= 0:
-        return
-    delay = random.uniform(0, ms_max / 1000.0)
-    time.sleep(delay)
 
 
 def maybe_perform_linkedin_login(context: BrowserContext) -> None:
@@ -103,6 +101,7 @@ def _first_text(page: Page, selectors: list[str], timeout: float = 3_000) -> Opt
 
 def _linkedin_description_text(page: Page) -> Optional[str]:
     selectors = [
+        '[data-testid="expandable-text-box"]',
         ".jobs-description-content__text",
         ".jobs-description__content",
         "[class*='job-details-about-the-job']",
@@ -122,6 +121,76 @@ def _linkedin_description_text(page: Page) -> Optional[str]:
     return None
 
 
+def _linkedin_title_text(page: Page) -> Optional[str]:
+    """Prefer new job view (verified badge row), then legacy selectors."""
+    return _first_text(
+        page,
+        [
+            'p:has([aria-label="Verified job"])',
+            "h1",
+            ".job-details-jobs-unified-top-card__job-title",
+            "[data-test-job-card-title]",
+        ],
+    )
+
+
+def _linkedin_company_text(page: Page) -> Optional[str]:
+    """Company name link in top card; avoid hashed BEM-only classes."""
+    selectors = [
+        ".job-details-jobs-unified-top-card__company-name a",
+        "a[data-tracking-control-name='public_jobs_topcard-org-name']",
+        'a[href*="linkedin.com/company/"][href*="/life"]',
+        'main a[href*="linkedin.com/company/"]',
+        'a[href*="linkedin.com/company/"]',
+        ".job-details-jobs-unified-top-card__company-name",
+    ]
+    for sel in selectors:
+        loc = page.locator(sel).first
+        try:
+            if loc.count() == 0:
+                continue
+            t = loc.inner_text(timeout=3_000)
+            t = re.sub(r"\s+", " ", t).strip()
+            if t and len(t) < 200:
+                return t
+        except Exception:
+            continue
+    return None
+
+
+def _linkedin_location_text(page: Page) -> Optional[str]:
+    """Location from top metadata line 'Place · time ago · applicants' or legacy bullets."""
+    t = _first_text(
+        page,
+        [
+            ".job-details-jobs-unified-top-card__bullet",
+            ".job-details-jobs-unified-top-card__primary-description-container",
+        ],
+    )
+    if t:
+        return re.sub(r"\s+", " ", t).split("\n")[0].strip()
+
+    try:
+        cands = page.locator("p").filter(
+            has_text=re.compile(r"ago|applicant", re.IGNORECASE)
+        )
+        n = min(cands.count(), 40)
+        for i in range(n):
+            try:
+                raw = cands.nth(i).inner_text(timeout=2_000)
+            except Exception:
+                continue
+            raw = re.sub(r"\s+", " ", raw).strip()
+            if "·" not in raw:
+                continue
+            part = raw.split("·")[0].strip()
+            if part and len(part) > 2 and not part.lower().startswith("http"):
+                return part
+    except Exception:
+        pass
+    return None
+
+
 def extract_linkedin_job(context: BrowserContext, job_url: str) -> ExtractedPageText:
     page = context.new_page()
     try:
@@ -134,29 +203,9 @@ def extract_linkedin_job(context: BrowserContext, job_url: str) -> ExtractedPage
         if "challenge" in u or "checkpoint" in u:
             return ExtractedPageText(error="linkedin_checkpoint_or_challenge")
 
-        title = _first_text(
-            page,
-            [
-                "h1",
-                ".job-details-jobs-unified-top-card__job-title",
-                "[data-test-job-card-title]",
-            ],
-        )
-        company = _first_text(
-            page,
-            [
-                ".job-details-jobs-unified-top-card__company-name a",
-                ".job-details-jobs-unified-top-card__company-name",
-                "a[data-tracking-control-name='public_jobs_topcard-org-name']",
-            ],
-        )
-        location = _first_text(
-            page,
-            [
-                ".job-details-jobs-unified-top-card__bullet",
-                ".job-details-jobs-unified-top-card__primary-description-container",
-            ],
-        )
+        title = _linkedin_title_text(page)
+        company = _linkedin_company_text(page)
+        location = _linkedin_location_text(page)
         description = _linkedin_description_text(page)
 
         if not title and not description:
@@ -190,6 +239,8 @@ def playwright_browser_context() -> Iterator[BrowserContext]:
     headless = _env_bool("JOBO_PLAYWRIGHT_HEADLESS", False)
     cdp = (os.environ.get("JOBO_PLAYWRIGHT_CDP_URL") or "").strip()
     user_data = (os.environ.get("JOBO_PLAYWRIGHT_USER_DATA_DIR") or "").strip()
+
+    _suppress_node_dep0169_for_playwright()
 
     with sync_playwright() as p:
         browser: Optional[Browser] = None
@@ -230,5 +281,14 @@ def playwright_browser_context() -> Iterator[BrowserContext]:
 
 
 def enrich_delay_jitter() -> None:
-    """Call between job URLs to reduce burst traffic."""
-    _maybe_jitter_between_jobs()
+    """Sleep a random 0..JOBO_ENRICH_DELAY_MS_MAX ms between job URLs; no-op if unset/invalid."""
+    raw = os.environ.get("JOBO_ENRICH_DELAY_MS_MAX", "").strip()
+    if not raw:
+        return
+    try:
+        ms_max = int(raw)
+    except ValueError:
+        return
+    if ms_max <= 0:
+        return
+    time.sleep(random.uniform(0, ms_max / 1000.0))

@@ -22,6 +22,9 @@ class Job:
     last_seen_at: datetime = field(default_factory=datetime.utcnow)
     metadata_json: str = "{}"
     module2_attempted: bool = False
+    module2_enriched_at: Optional[datetime] = None
+    module2_model: Optional[str] = None
+    module2_last_error: Optional[str] = None
     id: Optional[int] = None
 
     def to_dict(self) -> dict:
@@ -41,6 +44,11 @@ class Job:
             "last_seen_at": self.last_seen_at.isoformat(),
             "metadata_json": self.metadata_json,
             "module2_attempted": self.module2_attempted,
+            "module2_enriched_at": self.module2_enriched_at.isoformat()
+            if self.module2_enriched_at
+            else None,
+            "module2_model": self.module2_model,
+            "module2_last_error": self.module2_last_error,
         }
 
 
@@ -60,6 +68,9 @@ class JobModel(Base):
     last_seen_at = Column(DateTime, nullable=False, default=func.now())
     metadata_json = Column(Text, nullable=False, default="{}")
     module2_attempted = Column(Boolean, nullable=False, default=False)
+    module2_enriched_at = Column(DateTime, nullable=True)
+    module2_model = Column(String, nullable=True)
+    module2_last_error = Column(Text, nullable=True)
 
     def to_job(self) -> Job:
         return Job(
@@ -76,4 +87,7 @@ class JobModel(Base):
             last_seen_at=self.last_seen_at,
             metadata_json=self.metadata_json,
             module2_attempted=bool(self.module2_attempted),
+            module2_enriched_at=self.module2_enriched_at,
+            module2_model=self.module2_model,
+            module2_last_error=self.module2_last_error,
         )

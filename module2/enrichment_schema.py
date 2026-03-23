@@ -2,20 +2,17 @@ import json
 import re
 from typing import Any, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class EnrichmentOutput(BaseModel):
-    """Expected JSON shape from the LLM (flexible extras allowed)."""
+    """JSON from the LLM: top-level columns + free-form description-derived metadata."""
 
     company_name: Optional[str] = None
     job_title: Optional[str] = None
     location: Optional[str] = None
     date_released: Optional[str] = None
-    employment_type: Optional[str] = None
-    remote_policy: Optional[str] = None
-    summary: Optional[str] = None
-    requirements_bullets: Optional[list[str]] = None
+    job_metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
 
@@ -24,9 +21,6 @@ class EnrichmentOutput(BaseModel):
         "job_title",
         "location",
         "date_released",
-        "employment_type",
-        "remote_policy",
-        "summary",
         mode="before",
     )
     @classmethod
@@ -34,6 +28,15 @@ class EnrichmentOutput(BaseModel):
         if isinstance(v, str) and not v.strip():
             return None
         return v
+
+    @field_validator("job_metadata", mode="before")
+    @classmethod
+    def job_metadata_as_dict(cls, v: Any) -> dict[str, Any]:
+        if v is None:
+            return {}
+        if isinstance(v, dict):
+            return v
+        return {}
 
 
 _FENCE_RE = re.compile(

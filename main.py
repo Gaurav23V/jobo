@@ -82,7 +82,7 @@ def enrich(quiet: bool, dry_run: bool, force: bool):
         result = run_enrich(session, dry_run=dry_run, force=force)
 
         click.echo("\nSummary:")
-        click.echo(f"  Processed: {result.processed}")
+        click.echo(f"  Attempted: {result.attempted}")
         click.echo(f"  Succeeded: {result.succeeded}")
         click.echo(f"  Failed: {result.failed}")
         if result.errors:

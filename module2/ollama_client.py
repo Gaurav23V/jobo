@@ -18,7 +18,7 @@ def _ollama_host() -> str:
 
 
 def _ollama_model() -> str:
-    return os.environ.get("OLLAMA_MODEL", "llama3.2")
+    return os.environ.get("OLLAMA_MODEL", "gemma3:4b")
 
 
 def get_ollama_model() -> str:
@@ -78,8 +78,9 @@ def generate_json_enrichment_with_retry(
 
     fix_user = (
         user_prompt
-        + "\n\nYour previous output was invalid. Reply with a single JSON object only, "
-        "no markdown, matching the schema. Previous (broken) output:\n"
+        + "\n\nYour previous output was invalid. Reply with one JSON object only, "
+        "no markdown, with keys company_name, job_title, location, date_released, "
+        "job_metadata (object). Previous (broken) output:\n"
         + raw[:8000]
     )
     out2, err2, raw2 = generate_json_enrichment(system_prompt, fix_user, timeout=timeout)
