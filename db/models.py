@@ -21,6 +21,7 @@ class Job:
     first_seen_at: datetime = field(default_factory=datetime.utcnow)
     last_seen_at: datetime = field(default_factory=datetime.utcnow)
     metadata_json: str = "{}"
+    module2_attempted: bool = False
     id: Optional[int] = None
 
     def to_dict(self) -> dict:
@@ -39,6 +40,7 @@ class Job:
             "first_seen_at": self.first_seen_at.isoformat(),
             "last_seen_at": self.last_seen_at.isoformat(),
             "metadata_json": self.metadata_json,
+            "module2_attempted": self.module2_attempted,
         }
 
 
@@ -57,6 +59,7 @@ class JobModel(Base):
     first_seen_at = Column(DateTime, nullable=False, default=func.now())
     last_seen_at = Column(DateTime, nullable=False, default=func.now())
     metadata_json = Column(Text, nullable=False, default="{}")
+    module2_attempted = Column(Boolean, nullable=False, default=False)
 
     def to_job(self) -> Job:
         return Job(
@@ -72,4 +75,5 @@ class JobModel(Base):
             first_seen_at=self.first_seen_at,
             last_seen_at=self.last_seen_at,
             metadata_json=self.metadata_json,
+            module2_attempted=bool(self.module2_attempted),
         )

@@ -25,52 +25,49 @@ Primary target in the first iteration: **LinkedIn** job posting pages. Other pla
 
 ## Row selection: which jobs to process
 
-Only rows that still have **no usable signal** in any of these three fields should be candidates for a scrape + LLM pass:
+Eligibility is driven by a **single column** on `jobs`:
 
-| Field | Treat as “empty” |
-|--------|-------------------|
-| `company_name` | SQL `NULL` |
-| `job_title` | SQL `NULL` |
-| `metadata_json` | `NULL`, or after parse: empty object `{}`, or otherwise “no enrichment payload yet” (exact rule should match how we write successful/failed enrichment; see below) |
+| Column | Meaning |
+|--------|---------|
+| `module2_attempted` | `0` / `false`: Module 2 has **not** run on this row yet — **enqueue** for the automatic pipeline (subject to optional filters like platform or `--limit`). |
+| | `1` / `true`: Module 2 has **already run** (success, partial success, or failure) — **do not** auto-run again. |
 
-**Rule:** If **any** of `company_name`, `job_title`, or `metadata_json` already carries data we can use for filtering, **do not** enqueue that row for Module 2 again.
+**Rule:** Run Module 2 on **every** stored job link **once** by default, regardless of whether Module 1 left `company_name`, `job_title`, or `metadata_json` empty or partially filled. The page pass may still add or refine fields.
 
-**Rationale (hypothesis):** If we could not infer missing fields on the first successful extraction pass, a second pass with the same page is unlikely to recover them; avoid wasted requests and rate-limit risk.
+**After each run:** Set `module2_attempted = true` when the attempt finishes (whether extraction and LLM steps succeeded or not), so blocked pages, 404s, and bad parses are not retried forever.
 
-**Implementation note:** Today `metadata_json` is `NOT NULL` with default `'{}'` in the schema. “Empty” for selection must be defined in code (e.g. `NULL` OR `'{ }'` OR parsed dict with no keys / only sentinel keys). Align this definition with whatever we store after a failed or partial run.
+**Optional later:** A CLI flag such as `--force` may clear or ignore `module2_attempted` for manual re-enrichment; not required for the first implementation.
 
 ---
 
-## Optional: “already attempted” flag (schema change)
+## Database schema (`jobs`)
 
-For cases where the page is gone, blocked, or extraction fails, we still need to **stop retrying forever** without violating the “any of three fields” rule above.
+Relevant columns (see `db/models.py` for the source of truth):
 
-**Idea:** Add a boolean column (name TBD, e.g. `enrichment_attempted` or `module2_attempted`) that means: Module 2 has already tried this URL (success or failure).
+| Column | Notes |
+|--------|--------|
+| `module2_attempted` | `BOOLEAN NOT NULL DEFAULT 0`. Primary gate for Module 2 scheduling. |
+| `company_name`, `job_title`, `location`, `date_released`, `metadata_json` | Populated by Module 1 when possible; Module 2 may fill or update after visiting `job_url`. |
 
-- `false` (or `NULL` if we add the column with default): eligible to try, subject to the three-field rule.
-- `true`: do not automatically retry unless we add a separate manual “force re-enrich” path later.
-
-Whether this column is required on day one vs. encoded inside `metadata_json` (e.g. `{"_module2": {"attempted": true, ...}}`) is an implementation choice; a dedicated column keeps queries simple.
-
-**Not validated:** Exact column name and migration path until we implement and run migrations.
+**Existing databases:** `init_db()` runs a small migration that adds `module2_attempted` if the column is missing (SQLite `ALTER TABLE ... ADD COLUMN`). New databases get the column from `create_all` via the ORM.
 
 ---
 
 ## Open idea: skip scraping using email-derived fields
 
-Using **company name, job id, or similar** from Module 1 (if present in email parsing) to decide whether a URL must be opened at all is an optional optimization. Not finalized; implement only if Module 1 reliably provides those fields for a subset of rows.
+Using **company name, job id, or similar** from Module 1 to skip opening some URLs is an optional optimization. Not finalized; implement only if it proves useful and reliable.
 
 ---
 
 ## Pipeline (high level)
 
-1. **Query** – Select jobs matching the empty-field rule (and not blocked by “already attempted” if we add it).
+1. **Query** – Select rows where `module2_attempted` is false (and optional filters: `source_platform`, `--limit`, etc.).
 2. **Browser** – Open `job_url` with Playwright (Python). Session handling (persistent Chromium profile, CDP attach to running browser, headless vs headed) is **implementation detail to be tuned**; see “Browser” below.
 3. **Extract (LinkedIn-specific)** – Pull only the text (and minimal structure if needed) from regions of the page where title, company, location, and description live. **Do not** send full HTML to the LLM.
 4. **Normalize** – Single plain-text bundle (or a few labeled sections as text) suitable for the model context window.
 5. **LLM** – Prompt + desired JSON shape; model returns JSON (local **Ollama** first).
 6. **Validate** – Parse JSON; optional schema validation (e.g. Pydantic). On failure, retry policy TBD (single retry with “fix JSON” prompt is a common pattern).
-7. **Persist** – Map into `company_name`, `job_title`, `location`, `date_released`, `metadata_json`, etc.; commit; mark attempt complete if using an attempt flag.
+7. **Persist** – Map into `company_name`, `job_title`, `location`, `date_released`, `metadata_json`, etc.; set **`module2_attempted = true`**; commit.
 
 ---
 
@@ -94,15 +91,15 @@ Using **company name, job id, or similar** from Module 1 (if present in email pa
 ## JSON shape and DB mapping
 
 - **Target:** One JSON object per job with fields we care about (aligned with DB columns plus extras).
-- **Columns:** Map deterministically into `company_name`, `job_title`, `location`, `date_released` where the model returns them; put extended or uncertain fields in `metadata_json` (e.g. raw bullets, seniority, employment type, model id, scrape timestamp).
-- **Schema changes:** The `jobs` table may gain new columns (e.g. attempt flag). Any change should stay backward-compatible with Module 1 rows.
+- **Columns:** Map deterministically into `company_name`, `job_title`, `location`, `date_released` where the model returns them; put extended or uncertain fields in `metadata_json` (e.g. raw bullets, seniority, employment type, model id, scrape timestamp, error details on failure).
+- **Attempt flag:** Success or failure, set `module2_attempted` when the Module 2 pass is complete for that row.
 
 ---
 
 ## CLI / integration
 
 - Mirror Module 1: a **Click** subcommand on `main.py` (exact name TBD, e.g. `enrich` or `module2`) that opens a DB session, runs the pipeline for the selected batch, and prints a short summary (processed, succeeded, failed, skipped).
-- Options to define during implementation: `--limit`, `--dry-run`, `--force` (if we ever support re-processing).
+- Options to define during implementation: `--limit`, `--dry-run`, `--force` (re-run even when `module2_attempted` is true).
 
 ---
 
@@ -110,9 +107,9 @@ Using **company name, job id, or similar** from Module 1 (if present in email pa
 
 | Situation | Direction |
 |-----------|-----------|
-| HTTP error, timeout, login wall | Record failure in `metadata_json` and/or set attempt flag; do not infinite-loop. |
-| Partial JSON from LLM | Retry policy + validation; avoid writing partial strings into typed columns without review rules. |
-| Page removed / 404 | Mark attempted; no repeat unless manual override. |
+| HTTP error, timeout, login wall | Record minimal details in `metadata_json` if useful; set **`module2_attempted = true`**; do not infinite-loop. |
+| Partial JSON from LLM | Retry policy + validation; avoid writing junk into typed columns without clear rules. |
+| Page removed / 404 | Set **`module2_attempted = true`**; no automatic repeat unless `--force` (or equivalent) exists. |
 
 Exact fields stored for debugging should be minimal and reviewable (e.g. error code, HTTP status, one-line message).
 
@@ -121,16 +118,16 @@ Exact fields stored for debugging should be minimal and reviewable (e.g. error c
 ## What remains uncertain (explicit)
 
 - Exact **LinkedIn** selectors and wait strategy until implemented and tested on real pages.
-- Whether **`metadata_json` alone** is enough to record “failed attempt” without a new column, or whether a **dedicated boolean** is preferable for queries.
 - **Ollama** model choice and whether `format: json` (or equivalent) is used server-side.
-- Optional **Gemini** (or other) fallback: only after local path is understood.
+- Optional **Gemini** (or other) fallback: only after the local path is understood.
 - **Email-derived skip** optimization: depends on Module 1 data quality.
 
 ---
 
 ## Related code / schema
 
-- ORM model: `db/models.py` – `Job` / `JobModel` (`jobs` table).
+- ORM model: `db/models.py` – `Job` / `JobModel` (`jobs` table), including `module2_attempted`.
+- DB init / migration: `db/database.py` – `init_db()` and `_ensure_jobs_module2_attempted_column()`.
 - Module 1 CLI pattern: `main.py` – `collector` command; Module 2 should follow the same session/init style when added.
 
 ---
@@ -140,3 +137,4 @@ Exact fields stored for debugging should be minimal and reviewable (e.g. error c
 | Date | Change |
 |------|--------|
 | 2026-03-22 | Initial Module 2 implementation doc from design discussion. |
+| 2026-03-22 | Row selection: `module2_attempted` only; schema + migration in repo. |
