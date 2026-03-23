@@ -1,3 +1,11 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["db", "module1", "module2"]
+
 [project]
 name = "jobo"
 version = "0.1.0"
@@ -13,6 +21,9 @@ dependencies = [
     "lxml",
     "python-dateutil",
     "python-dotenv",
+    "playwright",
+    "httpx",
+    "pydantic",
 ]
 
 [project.optional-dependencies]

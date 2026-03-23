@@ -1,0 +1,20 @@
+Metadata-Version: 2.4
+Name: jobo
+Version: 0.1.0
+Summary: Job Application Automation System
+Requires-Python: >=3.11
+Requires-Dist: click
+Requires-Dist: google-api-python-client
+Requires-Dist: google-auth-httplib2
+Requires-Dist: google-auth-oauthlib
+Requires-Dist: sqlalchemy
+Requires-Dist: beautifulsoup4
+Requires-Dist: lxml
+Requires-Dist: python-dateutil
+Requires-Dist: python-dotenv
+Requires-Dist: playwright
+Requires-Dist: httpx
+Requires-Dist: pydantic
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"

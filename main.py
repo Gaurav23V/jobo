@@ -10,8 +10,9 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent))
 
 import click
-from module1.runner import run
-from db.database import init_db, get_session
+from db.database import get_session, init_db
+from module1.runner import run as run_collector
+from module2.runner import run_enrich
 
 
 @click.group()
@@ -41,7 +42,7 @@ def collector(hours: int, quiet: bool, dry_run: bool):
         session = get_session()
 
         # Pass session to the module runner
-        result = run(session=session, hours=hours, dry_run=dry_run)
+        result = run_collector(session=session, hours=hours, dry_run=dry_run)
 
         click.echo(f"\nSummary:")
         click.echo(f"  Emails processed: {result.emails_processed}")
@@ -50,6 +51,46 @@ def collector(hours: int, quiet: bool, dry_run: bool):
         click.echo(f"  Updated: {result.updated_jobs}")
         if result.errors:
             click.echo(f"  Errors: {len(result.errors)}")
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise click.Abort()
+
+
+@cli.command("enrich")
+@click.option("--dry-run", is_flag=True, help="Full pipeline; do not write to the database")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Re-process all jobs (ignore module2_attempted); may hit many URLs",
+)
+@click.option("--quiet", is_flag=True, help="Suppress verbose output")
+def enrich(quiet: bool, dry_run: bool, force: bool):
+    """Enrich job rows from LinkedIn pages via Playwright + Ollama."""
+
+    if quiet:
+        logging.basicConfig(level=logging.WARNING)
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
+    try:
+        init_db()
+        session = get_session()
+        result = run_enrich(session, dry_run=dry_run, force=force)
+
+        click.echo("\nSummary:")
+        click.echo(f"  Processed: {result.processed}")
+        click.echo(f"  Succeeded: {result.succeeded}")
+        click.echo(f"  Failed: {result.failed}")
+        if result.errors:
+            click.echo(f"  Error lines: {len(result.errors)}")
+            for e in result.errors[:20]:
+                click.echo(f"    - {e}")
+            if len(result.errors) > 20:
+                click.echo(f"    ... and {len(result.errors) - 20} more")
 
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
