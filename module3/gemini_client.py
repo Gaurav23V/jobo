@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import TypeVar
 
 from google import genai
@@ -35,53 +36,62 @@ def generate_structured(
     user_text: str,
     response_model: type[T],
 ) -> T:
-    """Call Gemini with JSON schema; retry once on empty/invalid JSON."""
+    """Call Gemini with JSON schema; retry up to 3 times with exponential backoff (60s, 120s, 240s)."""
     client = _client()
     schema = response_model.model_json_schema()
-    fix_suffix = (
-        "\n\nYour previous reply was empty or invalid JSON. "
-        "Reply with one JSON object only, matching the schema."
+    max_attempts = 4
+    backoff_sec = (60, 120, 240)
+
+    config = types.GenerateContentConfig(
+        system_instruction=system_instruction,
+        response_mime_type="application/json",
+        response_json_schema=schema,
     )
 
-    payloads: list[tuple[str, str, bool]] = [
-        (system_instruction, user_text, True),
-        (system_instruction, user_text + fix_suffix, True),
-        (system_instruction, user_text + fix_suffix, False),
-    ]
-
     last_err: str | None = None
-    for si, ut, use_si_field in payloads:
+    for attempt in range(max_attempts):
+        if attempt > 0:
+            delay = backoff_sec[attempt - 1]
+            logger.info(
+                "Gemini structured call retry %s/%s after %s s backoff",
+                attempt + 1,
+                max_attempts,
+                delay,
+            )
+            time.sleep(delay)
         try:
-            if use_si_field:
-                config = types.GenerateContentConfig(
-                    system_instruction=si,
-                    response_mime_type="application/json",
-                    response_json_schema=schema,
-                )
-                contents = ut
-            else:
-                config = types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_json_schema=schema,
-                )
-                contents = f"SYSTEM INSTRUCTIONS:\n{si}\n\nUSER:\n{ut}"
             resp = client.models.generate_content(
                 model=model,
-                contents=contents,
+                contents=user_text,
                 config=config,
             )
             raw = (resp.text or "").strip()
         except Exception as e:
             last_err = str(e)
-            logger.warning("Gemini request failed: %s", e)
+            logger.warning(
+                "Gemini request failed (attempt %s/%s): %s",
+                attempt + 1,
+                max_attempts,
+                e,
+            )
             continue
         if not raw:
             last_err = "empty response text"
+            logger.warning(
+                "Gemini empty response (attempt %s/%s)",
+                attempt + 1,
+                max_attempts,
+            )
             continue
         try:
             return _parse_or_raise(raw, response_model)
         except (ValidationError, ValueError) as e:
             last_err = f"parse: {e}"
-            logger.warning("Gemini JSON parse failed: %s", e)
+            logger.warning(
+                "Gemini JSON parse failed (attempt %s/%s): %s",
+                attempt + 1,
+                max_attempts,
+                e,
+            )
 
     raise RuntimeError(f"Gemini structured call failed after retries: {last_err}")
