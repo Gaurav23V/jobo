@@ -36,8 +36,8 @@ The product is structured as a pipeline of independent services, each with a cle
 ### Primary Goals
 
 1. **Collect job opportunities reliably** from Gmail job-alert emails into a structured, deduplicated local database.
-2. **Filter opportunities automatically** based on user profile, preferences, and job characteristics.
-3. **Prepare application materials** (resume variants, drafted answers, cover letter) with minimal manual input.
+2. **Filter opportunities automatically** based on user profile, preferences, and job characteristics (planned as **Module 3** fit decision; **Module 2** in the codebase is **page enrichment**, not filtering).
+3. **Prepare application materials** (resume variants, drafted answers, cover letter) with minimal manual input (**Module 3**).
 4. **Streamline application submission** by automating form filling, document uploads, and answering common questions.
 5. **Maximize referral conversion** by identifying internal connections, drafting outreach, and automating follow-ups.
 
@@ -96,11 +96,12 @@ Build a deterministic, reliable job collector that:
 
 ---
 
-## module 2–4 (Single-Line Roadmap)
+## module 2–4 (Roadmap – aligned with the repo)
 
-- **module 2**: Filtering and scoring module – evaluate opportunities against user profile and preferences, output ranked shortlist.
-- **module 3**: Application material generation – create resume variants, draft answers, generate cover letters for top-ranked jobs.
-- **module 4**: Browser automation for submissions – fill ATS forms, upload files, answer questions, submit applications; include LinkedIn integration for safe, rate-limited manual outreach with system assistance.
+- **module 1**: Gmail ingest → parse → SQLite `jobs` (collector); see `main.py` command `collector`.
+- **module 2**: **Job page enrichment** – open `job_url`, extract posting text, local LLM → structured JSON; updates `metadata_json`, core columns, and Module 2 provenance fields; see `main.py` command `enrich` and `docs/module2_implementation.md`. This is **not** the same as “filtering”; it prepares rich job text for downstream steps.
+- **module 3**: **Fit decision and application packet** – user context file + remote LLM (planned: Gemini) to set a **should-apply** style flag, optional tailored resume LaTeX, cover letter, local PDFs and paths for Module 4; see `docs/module3_overview.md`.
+- **module 4**: Browser automation for submissions – fill ATS forms, upload files, answer questions, submit applications; LinkedIn/referral assistance as scoped later.
 
 ---
 
@@ -124,19 +125,17 @@ module 1: COLLECTOR (This Release)
      v1 API             LLM Fallback        messages, opportunities,
                                             extraction_log
 
-module 2: FILTER & SCORE (Future)
+module 2: ENRICH (LinkedIn / posting page)
 ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-│  Opportunity │─────▶│  Scoring &   │─────▶│   Ranked     │
-│   Database   │      │  Filtering   │      │   Shortlist  │
+│  jobs rows   │─────▶│  Playwright  │─────▶│  Structured  │
+│  + job_url   │      │  + local LLM │      │  metadata    │
 └──────────────┘      └──────────────┘      └──────────────┘
-                            ▲
-                            │
-                      User profile + preferences
 
-module 3: MATERIAL GENERATION (Future)
+module 3: FIT + MATERIALS (Future)
 ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-│   Ranked     │─────▶│  Resume &    │─────▶│  Application │
-│   Jobs       │      │  Cover Gen   │      │   Packet     │
+│  Enriched    │─────▶│  User context│─────▶│  should_apply│
+│  job +       │      │  + Gemini    │      │  + resume/   │
+│  metadata    │      │  (API)       │      │  cover PDFs  │
 └──────────────┘      └──────────────┘      └──────────────┘
 
 module 4: APPLICATION & REFERRAL (Future)
@@ -166,6 +165,8 @@ module 4: APPLICATION & REFERRAL (Future)
 ## Database Schema (module 1)
 
 ### Table (Jobs)
+
+The **source of truth** for the live schema is `db/models.py` (SQLAlchemy) and `db/database.py` (migrations for existing SQLite files). The DDL below reflects the **original** Module 1 sketch; production databases may have **additional columns** (e.g. Module 2: `module2_attempted`, `module2_enriched_at`, `module2_model`, `module2_last_error`) and future Module 3 columns for fit and file paths.
 
 ```
 CREATE TABLE jobs (

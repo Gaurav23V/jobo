@@ -22,6 +22,8 @@ Module 1 stores rows with at least `job_url`, `source_platform`, and timestamps.
 
 The first implementation targets **LinkedIn** job posting pages only (extraction logic is LinkedIn-specific). Each run processes **every** row that still needs Module 2—no `source_platform` filter, no row cap in the query. Other platforms can reuse the same pipeline pattern later with different extraction steps.
 
+**Relationship to Module 3:** Enrichment makes job descriptions and requirements available for a later **fit decision** and resume/cover generation. Filtering, scoring, and “should I apply?” live in **Module 3** (see `docs/module3_overview.md`), not in Module 2.
+
 ---
 
 ## What Module 2 is not
@@ -155,3 +157,4 @@ Exact fields stored for debugging should be minimal and reviewable (e.g. error c
 | 2026-03-22 | Browser doc: vanilla launch + `.env` LinkedIn credentials for sign-in. |
 | 2026-03-22 | CLI: command `enrich`; `--dry-run` = full pipeline, no DB writes. |
 | 2026-03-22 | Initial `module2` implementation, docs synced to shipped behavior. |
+| 2026-03-24 | Clarified Module 2 vs Module 3; linked `docs/module3_overview.md`. |

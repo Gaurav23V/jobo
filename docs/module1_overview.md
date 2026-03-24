@@ -171,7 +171,7 @@ Module 1 is considered complete and successful when:
 
 ## Future Modules (Brief Roadmap)
 
-- **Module 2** – Filtering and Scoring: Evaluate jobs against user profile and preferences; rank by fit.
-- **Module 3** – Material Generation: Create tailored resume variants, answer drafts, cover letters.
-- **Module 4** – Application and Referral: Browser automation for submissions; LinkedIn integration for referrals.
+- **Module 2** – **Job page enrichment** (implemented in repo): Visit `job_url`, extract posting text, local LLM → structured `metadata_json` and columns; CLI `jobo enrich`. See `docs/module2_implementation.md`. This prepares full job text; it does **not** decide whether you should apply.
+- **Module 3** – **Fit decision and application packet**: User-maintained context file + API LLM (planned: Gemini) → nullable **should-apply** flag, free-form reasoning for human review, comma-separated project names for tailoring; second call only when applying → optional custom resume LaTeX, cover letter, local PDFs and DB paths. See `docs/module3_overview.md`.
+- **Module 4** – Application and Referral: Browser automation for submissions; LinkedIn integration for referrals as scoped.
 
