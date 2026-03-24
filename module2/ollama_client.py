@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from typing import Optional
 
 import httpx
@@ -82,19 +83,28 @@ def generate_json_enrichment_with_retry(
     *,
     timeout: float = 120.0,
 ) -> tuple[Optional[EnrichmentOutput], Optional[str], str]:
-    """One retry with a fix-JSON hint if the first response does not validate."""
-    out, err, raw = generate_json_enrichment(system_prompt, user_prompt, timeout=timeout)
-    if out is not None:
-        return out, None, raw
+    """Up to 3 identical Ollama calls; 2s then 4s pause before 2nd and 3rd attempt."""
+    last_err: Optional[str] = None
+    last_raw = ""
+    backoff_s = (2.0, 4.0)
 
-    fix_user = (
-        user_prompt
-        + "\n\nYour previous output was invalid. Reply with one JSON object only, "
-        "no markdown, with keys company_name, job_title, location, date_released, "
-        "job_metadata (object). Previous (broken) output:\n"
-        + raw[:8000]
-    )
-    out2, err2, raw2 = generate_json_enrichment(system_prompt, fix_user, timeout=timeout)
-    if out2 is not None:
-        return out2, None, raw2
-    return None, err or err2, raw2 or raw
+    for attempt in range(3):
+        if attempt > 0:
+            delay = backoff_s[attempt - 1]
+            logger.info(
+                "Ollama enrichment failed (%s); pausing %.0fs before attempt %s/3",
+                last_err or "unknown",
+                delay,
+                attempt + 1,
+            )
+            time.sleep(delay)
+
+        out, err, raw = generate_json_enrichment(
+            system_prompt, user_prompt, timeout=timeout
+        )
+        last_raw = raw
+        last_err = err
+        if out is not None:
+            return out, None, raw
+
+    return None, last_err, last_raw
