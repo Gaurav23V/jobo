@@ -25,6 +25,12 @@ class Job:
     module2_enriched_at: Optional[datetime] = None
     module2_model: Optional[str] = None
     module2_last_error: Optional[str] = None
+    should_apply: Optional[bool] = None
+    module3_fit_score: Optional[int] = None
+    module3_fit_reasoning: Optional[str] = None
+    module3_highlighted_projects: Optional[str] = None
+    module3_resume_pdf_path: Optional[str] = None
+    module3_cover_pdf_path: Optional[str] = None
     id: Optional[int] = None
 
     def to_dict(self) -> dict:
@@ -49,6 +55,12 @@ class Job:
             else None,
             "module2_model": self.module2_model,
             "module2_last_error": self.module2_last_error,
+            "should_apply": self.should_apply,
+            "module3_fit_score": self.module3_fit_score,
+            "module3_fit_reasoning": self.module3_fit_reasoning,
+            "module3_highlighted_projects": self.module3_highlighted_projects,
+            "module3_resume_pdf_path": self.module3_resume_pdf_path,
+            "module3_cover_pdf_path": self.module3_cover_pdf_path,
         }
 
 
@@ -71,6 +83,12 @@ class JobModel(Base):
     module2_enriched_at = Column(DateTime, nullable=True)
     module2_model = Column(String, nullable=True)
     module2_last_error = Column(Text, nullable=True)
+    should_apply = Column(Boolean, nullable=True)
+    module3_fit_score = Column(Integer, nullable=True)
+    module3_fit_reasoning = Column(Text, nullable=True)
+    module3_highlighted_projects = Column(Text, nullable=True)
+    module3_resume_pdf_path = Column(Text, nullable=True)
+    module3_cover_pdf_path = Column(Text, nullable=True)
 
     def to_job(self) -> Job:
         return Job(
@@ -90,4 +108,10 @@ class JobModel(Base):
             module2_enriched_at=self.module2_enriched_at,
             module2_model=self.module2_model,
             module2_last_error=self.module2_last_error,
+            should_apply=self.should_apply,
+            module3_fit_score=self.module3_fit_score,
+            module3_fit_reasoning=self.module3_fit_reasoning,
+            module3_highlighted_projects=self.module3_highlighted_projects,
+            module3_resume_pdf_path=self.module3_resume_pdf_path,
+            module3_cover_pdf_path=self.module3_cover_pdf_path,
         )

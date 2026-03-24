@@ -13,6 +13,7 @@ import click
 from db.database import get_session, init_db
 from module1.runner import run as run_collector
 from module2.runner import run_enrich
+from module3.runner import run_module3
 
 
 @click.group()
@@ -87,6 +88,66 @@ def enrich(quiet: bool, dry_run: bool, force: bool):
         click.echo("\nSummary:")
         click.echo(f"  Attempted: {result.attempted}")
         click.echo(f"  Succeeded: {result.succeeded}")
+        click.echo(f"  Failed: {result.failed}")
+        if result.errors:
+            click.echo(f"  Error lines: {len(result.errors)}")
+            for e in result.errors[:20]:
+                click.echo(f"    - {e}")
+            if len(result.errors) > 20:
+                click.echo(f"    ... and {len(result.errors) - 20} more")
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise click.Abort()
+
+
+@cli.command("triage")
+@click.option("--dry-run", is_flag=True, help="Run pipeline; do not write to the database")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Ignore idempotency; re-run fit and/or materials for enriched jobs",
+)
+@click.option(
+    "--min-score",
+    type=int,
+    default=None,
+    help="Minimum fit score (0-5) to set should_apply; overrides JOBO_MIN_FIT_SCORE / default",
+)
+@click.option("--quiet", is_flag=True, help="Suppress verbose output")
+def triage(quiet: bool, dry_run: bool, force: bool, min_score: int | None):
+    """Module 3: triage enriched jobs (Gemini fit + resume/cover PDF paths)."""
+
+    if min_score is not None and not (0 <= min_score <= 5):
+        click.echo("Error: --min-score must be between 0 and 5.", err=True)
+        raise click.Abort()
+
+    if quiet:
+        logging.basicConfig(level=logging.WARNING)
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    try:
+        init_db()
+        session = get_session()
+        result = run_module3(
+            session,
+            dry_run=dry_run,
+            force=force,
+            min_score=min_score,
+        )
+
+        click.echo("\nSummary:")
+        click.echo(f"  Attempted: {result.attempted}")
+        click.echo(f"  Phase 1 run: {result.phase1_run}")
+        click.echo(f"  Phase 1 skipped: {result.phase1_skipped}")
+        click.echo(f"  Phase 2 run: {result.phase2_run}")
+        click.echo(f"  Phase 2 skipped: {result.phase2_skipped}")
         click.echo(f"  Failed: {result.failed}")
         if result.errors:
             click.echo(f"  Error lines: {len(result.errors)}")

@@ -15,6 +15,7 @@ Requires-Dist: python-dotenv
 Requires-Dist: playwright
 Requires-Dist: httpx
 Requires-Dist: pydantic
+Requires-Dist: google-genai>=1.0.0
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: ruff; extra == "dev"

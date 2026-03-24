@@ -100,7 +100,7 @@ Build a deterministic, reliable job collector that:
 
 - **module 1**: Gmail ingest → parse → SQLite `jobs` (collector); see `main.py` command `collector`.
 - **module 2**: **Job page enrichment** – open `job_url`, extract posting text, local LLM → structured JSON; updates `metadata_json`, core columns, and Module 2 provenance fields; see `main.py` command `enrich` and `docs/module2_implementation.md`. This is **not** the same as “filtering”; it prepares rich job text for downstream steps.
-- **module 3**: **Fit decision and application packet** – user context file + remote LLM (planned: Gemini) to set a **should-apply** style flag, optional tailored resume LaTeX, cover letter, local PDFs and paths for Module 4; see `docs/module3_overview.md`.
+- **module 3**: **Fit decision and application packet** – user context file + remote LLM (planned: Gemini) to set a **should-apply** style flag, optional tailored resume LaTeX, cover letter, local PDFs and paths for Module 4; CLI **`jobo triage`**; see `docs/module3_overview.md`.
 - **module 4**: Browser automation for submissions – fill ATS forms, upload files, answer questions, submit applications; LinkedIn/referral assistance as scoped later.
 
 ---

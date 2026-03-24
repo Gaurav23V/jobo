@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["db", "module1", "module2"]
+include = ["db", "module1", "module2", "module3"]
 
 [project]
 name = "jobo"
@@ -24,6 +24,7 @@ dependencies = [
     "playwright",
     "httpx",
     "pydantic",
+    "google-genai>=1.0.0",
 ]
 
 [project.optional-dependencies]

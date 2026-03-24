@@ -19,3 +19,4 @@ Thumbs.db
 # Project
 credentials/
 data/*.db
+module3/context/profile.md

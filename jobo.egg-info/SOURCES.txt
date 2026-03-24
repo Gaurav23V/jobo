@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 db/database.py
 db/models.py
@@ -18,3 +19,4 @@ module2/ollama_client.py
 module2/persist.py
 module2/query.py
 module2/runner.py
+module3/__init__.py

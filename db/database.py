@@ -55,10 +55,37 @@ def _ensure_jobs_module2_enrichment_columns() -> None:
             conn.execute(text(stmt))
 
 
+def _ensure_jobs_module3_columns() -> None:
+    """Add Module 3 triage columns (fit, paths)."""
+    inspector = inspect(engine)
+    if not inspector.has_table("jobs"):
+        return
+    columns = {c["name"] for c in inspector.get_columns("jobs")}
+    alters: list[str] = []
+    if "should_apply" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN should_apply BOOLEAN")
+    if "module3_fit_score" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module3_fit_score INTEGER")
+    if "module3_fit_reasoning" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module3_fit_reasoning TEXT")
+    if "module3_highlighted_projects" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module3_highlighted_projects TEXT")
+    if "module3_resume_pdf_path" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module3_resume_pdf_path TEXT")
+    if "module3_cover_pdf_path" not in columns:
+        alters.append("ALTER TABLE jobs ADD COLUMN module3_cover_pdf_path TEXT")
+    if not alters:
+        return
+    with engine.begin() as conn:
+        for stmt in alters:
+            conn.execute(text(stmt))
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_jobs_module2_attempted_column()
     _ensure_jobs_module2_enrichment_columns()
+    _ensure_jobs_module3_columns()
 
 
 def get_session() -> Session:

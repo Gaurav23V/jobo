@@ -120,6 +120,9 @@ jobo enrich
 # Enrich with force re-processing
 jobo enrich --force
 
+# Module 3: triage fit + prepare resume/cover PDFs (Gemini; see docs/module3_overview.md)
+jobo triage
+
 # Run full pipeline (collector + enrich)
 jobo all
 ```
@@ -135,6 +138,9 @@ jobo all
 - `--dry-run`: Full pipeline without writing to DB
 - `--force`: Re-process all jobs (ignore module2_attempted flag)
 - `--quiet`: Suppress verbose output
+
+**Triage Command (Module 3):**
+- `--dry-run`, `--force`, `--quiet` (see [docs/module3_overview.md](docs/module3_overview.md))
 
 ## Data Model
 

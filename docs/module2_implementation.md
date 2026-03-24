@@ -22,7 +22,7 @@ Module 1 stores rows with at least `job_url`, `source_platform`, and timestamps.
 
 The first implementation targets **LinkedIn** job posting pages only (extraction logic is LinkedIn-specific). Each run processes **every** row that still needs Module 2—no `source_platform` filter, no row cap in the query. Other platforms can reuse the same pipeline pattern later with different extraction steps.
 
-**Relationship to Module 3:** Enrichment makes job descriptions and requirements available for a later **fit decision** and resume/cover generation. Filtering, scoring, and “should I apply?” live in **Module 3** (see `docs/module3_overview.md`), not in Module 2.
+**Relationship to Module 3:** Enrichment makes job descriptions and requirements available for a later **fit decision** and resume/cover generation. Filtering, scoring, and “should I apply?” live in **Module 3** (CLI **`jobo triage`**; see `docs/module3_overview.md`), not in Module 2.
 
 ---
 

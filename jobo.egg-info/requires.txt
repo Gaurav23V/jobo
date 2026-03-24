@@ -10,6 +10,7 @@ python-dotenv
 playwright
 httpx
 pydantic
+google-genai>=1.0.0
 
 [dev]
 pytest
