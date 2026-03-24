@@ -11,6 +11,10 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
 logger = logging.getLogger(__name__)
 
+_SCRAPE_COMPLETE_MAX_ATTEMPTS = 3
+# Milliseconds to wait on the same page before attempt 2 and attempt 3 (lazy-loaded content).
+_SCRAPE_RETRY_DELAYS_MS = (5_000, 10_000)
+
 # Node 22+ emits DEP0169 for legacy `url.parse()`; Playwright's Node driver still hits that
 # path. Child processes inherit NODE_OPTIONS (see node --disable-warning=).
 _NODE_DEP0169_FLAG = "--disable-warning=DEP0169"
@@ -121,33 +125,9 @@ def _linkedin_description_text(page: Page) -> Optional[str]:
     return None
 
 
-def _linkedin_title_from_early_main_paragraphs(page: Page) -> Optional[str]:
-    """Unverified postings use a plain <p> for the title (no Verified badge); hashed classes rotate."""
-    try:
-        ps = page.locator("main p")
-        n = min(ps.count(), 15)
-        for i in range(n):
-            try:
-                raw = ps.nth(i).inner_text(timeout=2_000)
-            except Exception:
-                continue
-            t = re.sub(r"\s+", " ", raw).strip()
-            if not t or len(t) < 3 or len(t) > 200:
-                continue
-            if t.lower().startswith("http"):
-                continue
-            # Skip LinkedIn metadata line: "City · 3 days ago · N applicants"
-            if "·" in t and re.search(r"ago|applicant", t, re.IGNORECASE):
-                continue
-            return t
-    except Exception:
-        pass
-    return None
-
-
 def _linkedin_title_text(page: Page) -> Optional[str]:
-    """Verified row first; then legacy/h1; then plain top-card <p> (unverified listings)."""
-    t = _first_text(
+    """Verified row, then legacy h1/classes, then new top-card ``data-display-contents`` title."""
+    return _first_text(
         page,
         [
             'p:has([aria-label="Verified job"])',
@@ -155,11 +135,9 @@ def _linkedin_title_text(page: Page) -> Optional[str]:
             "h1",
             ".job-details-jobs-unified-top-card__job-title",
             "[data-test-job-card-title]",
+            'main [data-display-contents="true"] > p',
         ],
     )
-    if t:
-        return t
-    return _linkedin_title_from_early_main_paragraphs(page)
 
 
 def _linkedin_company_text(page: Page) -> Optional[str]:
@@ -219,6 +197,29 @@ def _linkedin_location_text(page: Page) -> Optional[str]:
     return None
 
 
+def _scrape_field_present(value: Optional[str]) -> bool:
+    return bool(value and str(value).strip())
+
+
+def _missing_scrape_fields(
+    title: Optional[str],
+    company: Optional[str],
+    location: Optional[str],
+    description: Optional[str],
+) -> list[str]:
+    """Stable order: title, company, location, description."""
+    missing: list[str] = []
+    if not _scrape_field_present(title):
+        missing.append("title")
+    if not _scrape_field_present(company):
+        missing.append("company")
+    if not _scrape_field_present(location):
+        missing.append("location")
+    if not _scrape_field_present(description):
+        missing.append("description")
+    return missing
+
+
 def extract_linkedin_job(context: BrowserContext, job_url: str) -> ExtractedPageText:
     page = context.new_page()
     try:
@@ -231,26 +232,63 @@ def extract_linkedin_job(context: BrowserContext, job_url: str) -> ExtractedPage
         if "challenge" in u or "checkpoint" in u:
             return ExtractedPageText(error="linkedin_checkpoint_or_challenge")
 
-        title = _linkedin_title_text(page)
-        company = _linkedin_company_text(page)
-        location = _linkedin_location_text(page)
-        description = _linkedin_description_text(page)
+        title: Optional[str] = None
+        company: Optional[str] = None
+        location: Optional[str] = None
+        description: Optional[str] = None
 
-        if not title and not description:
-            return ExtractedPageText(
-                error="no_title_or_description",
-                title=title,
-                company=company,
-                location=location,
-                description=description,
+        for attempt in range(1, _SCRAPE_COMPLETE_MAX_ATTEMPTS + 1):
+            title = _linkedin_title_text(page)
+            company = _linkedin_company_text(page)
+            location = _linkedin_location_text(page)
+            description = _linkedin_description_text(page)
+            missing = _missing_scrape_fields(title, company, location, description)
+            if not missing:
+                if attempt > 1:
+                    logger.info(
+                        "LinkedIn scrape complete url=%s attempt=%s/%s",
+                        job_url,
+                        attempt,
+                        _SCRAPE_COMPLETE_MAX_ATTEMPTS,
+                    )
+                return ExtractedPageText(
+                    title=title,
+                    company=company,
+                    location=location,
+                    description=description,
+                )
+
+            miss = ",".join(missing)
+            if attempt >= _SCRAPE_COMPLETE_MAX_ATTEMPTS:
+                logger.warning(
+                    "LinkedIn scrape failed url=%s after %s attempts missing=%s",
+                    job_url,
+                    _SCRAPE_COMPLETE_MAX_ATTEMPTS,
+                    miss,
+                )
+                return ExtractedPageText(
+                    error=(
+                        "incomplete_extraction: missing "
+                        f"{', '.join(missing)} (after {_SCRAPE_COMPLETE_MAX_ATTEMPTS} attempts)"
+                    ),
+                    title=title,
+                    company=company,
+                    location=location,
+                    description=description,
+                )
+
+            delay_ms = _SCRAPE_RETRY_DELAYS_MS[attempt - 1]
+            wait_sec = delay_ms // 1000
+            logger.info(
+                "LinkedIn scrape incomplete url=%s attempt=%s/%s missing=%s — "
+                "waiting %ds for lazy-loaded job content then retrying",
+                job_url,
+                attempt,
+                _SCRAPE_COMPLETE_MAX_ATTEMPTS,
+                miss,
+                wait_sec,
             )
-
-        return ExtractedPageText(
-            title=title,
-            company=company,
-            location=location,
-            description=description,
-        )
+            page.wait_for_timeout(delay_ms)
     except Exception as e:
         logger.exception(f"LinkedIn fetch failed for {job_url}")
         return ExtractedPageText(error=str(e))
