@@ -35,6 +35,7 @@ class Module3Result:
 
 
 def _paths_complete(job) -> bool:
+    """True when both Module 3 PDF paths are set — phase 2 outputs exist; skip re-generation."""
     r = (job.module3_resume_pdf_path or "").strip()
     c = (job.module3_cover_pdf_path or "").strip()
     return bool(r and c)
@@ -60,6 +61,18 @@ def run_module3(
     except FileNotFoundError as e:
         result.errors.append(str(e))
         return result
+
+    base_tex_path = constants.base_resume_tex_path()
+    default_pdf_path = constants.default_resume_pdf_path()
+    if base_tex_path is None or not base_tex_path.is_file():
+        raise RuntimeError(
+            "JOBO_BASE_RESUME_TEX must point to an existing .tex file."
+        )
+    if default_pdf_path is None or not default_pdf_path.is_file():
+        raise RuntimeError(
+            "JOBO_DEFAULT_RESUME_PDF must point to an existing PDF."
+        )
+    base_tex = base_tex_path.read_text(encoding="utf-8", errors="replace")
 
     for job in jobs:
         result.attempted += 1
@@ -98,22 +111,10 @@ def run_module3(
             if not job.should_apply:
                 continue
 
+            # Phase 2 idempotency: skip materials/PDFs if paths already saved (--force reruns).
             if _paths_complete(job) and not force:
                 result.phase2_skipped += 1
                 continue
-
-            base_tex_path = constants.base_resume_tex_path()
-            default_pdf_path = constants.default_resume_pdf_path()
-            if base_tex_path is None or not base_tex_path.is_file():
-                raise RuntimeError(
-                    "JOBO_BASE_RESUME_TEX must point to an existing .tex file "
-                    "when should_apply is true."
-                )
-            if default_pdf_path is None or not default_pdf_path.is_file():
-                raise RuntimeError(
-                    "JOBO_DEFAULT_RESUME_PDF must point to an existing PDF "
-                    "when should_apply is true."
-                )
 
             raw_hl = job.module3_highlighted_projects or "[]"
             try:
@@ -126,7 +127,6 @@ def run_module3(
                 profile_md,
                 [str(x) for x in hl_list],
             )
-            base_tex = base_tex_path.read_text(encoding="utf-8", errors="replace")
 
             mats = gemini_client.generate_structured(
                 model=model,

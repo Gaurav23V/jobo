@@ -1,38 +1,166 @@
-% Base resume for jobo triage (Module 3). Replace placeholders with your content.
-% The model may return a full replacement document when tailoring for a job.
-\documentclass[11pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
-\usepackage[margin=2.2cm]{geometry}
-\usepackage{hyperref}
-\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue}
-\setlength{\parindent}{0pt}
-\setlength{\parskip}{0.35em}
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[pdftex]{hyperref}
+\usepackage{fancyhdr}
+
+
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Adjust margins
+\addtolength{\oddsidemargin}{-0.375in}
+\addtolength{\evensidemargin}{-0.375in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Sections formatting
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+%-------------------------
+% Custom commands
+\newcommand{\resumeItem}[2]{
+  \item\small{
+    \textbf{#1}{: #2 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-1pt}\item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-5pt}
+}
+
+\newcommand{\resumeSubItem}[2]{\resumeItem{#1}{#2}\vspace{-4pt}}
+
+\renewcommand{\labelitemii}{$\circ$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=*]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+%-------------------------------------------
+%%%%%%  CV STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 
 \begin{document}
 
-{\LARGE \textbf{Your Name}} \hfill \href{mailto:you@example.com}{you@example.com} \\
-City, Country \hfill \href{https://github.com/yourhandle}{github.com/yourhandle}
+%----------HEADING-----------------
+\begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
+  \textbf{\href{https://www.gaurav23v.app/}{\Large Gaurav Verma}} & Email : \href{mailto:gaurav2301v@gmail.com}{gaurav2301v@gmail.com}\\
+  \href{https://www.linkedin.com/in/gaurav-verma-7ab556289/}{LinkedIn} & Mobile : +91-9166724375 \\
+\end{tabular*}
 
-\section*{Education}
-\textbf{University Name} \hfill Expected YYYY \\
-B.S.\ Computer Science (or your degree)
 
-\section*{Experience}
-\textbf{Company} --- Role \hfill Start -- End \\
-One line describing impact; quantify where you can.
+%-----------EDUCATION-----------------
+\section{Education}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Indian Institute of Information Technology Kota}{Kota, Rajasthan}
+      {Bachelor of Computer Science and Engineering}{Nov. 2022 - Jun. 2026}
+  \resumeSubHeadingListEnd
 
-\section*{Projects}
-\textbf{Project name} --- \textit{Stack: Python, PostgreSQL} \\
-Brief description and link if desired.
 
-\section*{Skills}
-Languages: \ldots \quad Frameworks: \ldots \quad Tools: \ldots
+%-----------EXPERIENCE-----------------
+\section{Experience}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Segwise.ai}{Bengaluru, Karnataka}
+      {Software Engineering Intern}{Jul. 2025 - Present}
+      \resumeItemListStart
+        \resumeItem{Pipeline Reliability \& Performance}
+          {Re-architected a failing analytics data sync pipeline that caused out-of-memory errors processing 112M+ rows. Replaced 220+ sequential database queries with in-memory hash lookups and partitioned batch writes, reducing execution time from 55+ hours to 2.5 hours (96\% improvement).}
+        \resumeItem{AI-Enrichment Pipeline}
+          {Developed and maintain an AI classification pipeline processing 1-2M rows daily across 143 orgs. Structured a dual-workflow system spanning PostgreSQL, ClickHouse, and MongoDB using Vertex AI.}
+        \resumeItem{Ad Platform Integration}
+          {Integrated StackAdapt, Taboola, LinkedIn, Reddit, and TradeDesk advertising APIs into the core data pipeline. Engineered connectors to extract ad and campaign data into the analytics system.}
+        \resumeItem{Workflow Orchestration}
+          {Orchestrated AWS Step Functions for daily and backfill workflows using SQS callback patterns with fault-tolerant ECS tasks, enabling resumable, observable pipelines.}
+        \resumeItem{Backend Development \& Production Support}
+          {Deployed Redis caching layer for 24 API endpoints and resolved 50+ production bugs in the Golang backend.}
+      \resumeItemListEnd
 
-\section*{Achievements}
-\begin{itemize}\itemsep0em
-  \item Achievement or award
-\end{itemize}
+    \resumeSubheading
+      {Upvalue}{Jaipur, Rajasthan}
+      {Software Intern}{Jun. 2024 - Aug. 2024}
+      \resumeItemListStart
+        \resumeItem{Data Engineering}
+          {Authored web crawlers for automated data collection, improving data extraction efficiency by 30\% and supporting the company's data pipeline infrastructure.}
+      \resumeItemListEnd
+  \resumeSubHeadingListEnd
 
+
+%--------PROGRAMMING SKILLS------------
+\section{Programming Skills}
+ \resumeSubHeadingListStart
+ \setlength{\itemsep}{0pt}
+   \item{
+     \textbf{Languages}{: Python, Golang, TypeScript, Java, SQL}
+   }
+   \item{
+     \textbf{Backend/Infra}{: PostgreSQL, ClickHouse, MongoDB, Redis, Docker, FastAPI, Gin}
+   }
+   \item{
+     \textbf{Cloud/DevOps}{: AWS (ECS, Step Functions, SQS, S3), GitHub Actions, New Relic, Git, Linux}
+   }
+ \resumeSubHeadingListEnd
+
+%-----------PROJECTS-----------------
+\section{Projects}
+  \resumeSubHeadingListStart
+    \resumeSubItem{Voxi \href{https://github.com/Gaurav23V/voxi}{| \textbf{\color{blue}GitHub}}}{
+     \vspace{-3pt}\begin{itemize}[topsep=0pt,itemsep=0pt]
+        \item Designed a local voice dictation tool for Linux using a Go daemon and Python ML worker connected via Unix socket JSON-RPC, with a 4-state machine enforcing single in-flight jobs and automatic worker restart on crash.
+        \item Leveraged Parakeet ASR and Ollama LLM for local speech-to-text cleanup, with Wayland-native insertion via \texttt{wtype} and \texttt{wl-copy} clipboard fallback, targeting p95 end-to-end latency under 2 seconds.
+      \end{itemize}
+    }
+
+    \resumeSubItem{Webhook Delivery Service \href{https://github.com/Gaurav23V/webhook-service}{| \textbf{\color{blue} Link}}}{
+      \vspace{-3pt}\begin{itemize}[topsep=0pt]
+        \item Built a webhook delivery system using FastAPI, PostgreSQL, and Redis, processing 5,000+ deliveries daily with 99.9\% reliability. Introduced exponential backoff retry reducing failures by 85\% and logging with 72-hour retention.
+      \end{itemize}
+    }
+
+    \resumeSubItem{TexForge \href{https://texforge-frontend-lsmd.onrender.com}{| \textbf{\color{blue} Live}}}{
+      \vspace{-3pt}\begin{itemize}[topsep=0pt]
+        \item Shipped a full-stack LaTeX editor (Next.js, TypeScript, Supabase) with real-time PDF compilation via a sandboxed FastAPI backend featuring timeout limits, pattern blocking, and concurrency controls.
+        \item Implemented autosave with debounced updates, stale compile cancellation ensuring latest-request wins, and view-only PDF sharing via tokenized links.
+      \end{itemize}
+    }
+  \resumeSubHeadingListEnd
+
+%--------Achievements & Leadership------------
+\section{Achievements \& Leadership}
+ \resumeSubHeadingListStart
+ \setlength{\itemsep}{0pt}
+   \item{
+     \textbf{LeetCode}{: Attained rating of 1900, reflecting consistent performance in competitive programming.}
+   }
+   \item{
+     \textbf{ML \& DevOps Lead, Google Developer Student Clubs}{: Led and organized 6+ events including 2 ML workshops for 75+ participants, coding a live Python sentiment analysis model in 90 minutes.}
+   }
+ \resumeSubHeadingListEnd
+
+%-------------------------------------------
 \end{document}
