@@ -18,6 +18,18 @@ def load_profile_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def get_introduction_markdown(markdown: str) -> str:
+    """Return body under ``# Introduction`` until the next top-level ``# ...`` heading (not ``##``)."""
+    m = re.search(r"(?ms)^#\s+Introduction\s*\n(.*)", markdown)
+    if not m:
+        return ""
+    body = m.group(1)
+    next_h1 = re.search(r"(?m)^#\s+.+\s*$", body)
+    if next_h1:
+        body = body[: next_h1.start()]
+    return body.strip()
+
+
 def parse_project_sections(markdown: str) -> dict[str, str]:
     """Map ## heading text -> body until next ## or EOF.
 

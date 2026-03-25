@@ -73,6 +73,7 @@ def run_module3(
             "JOBO_DEFAULT_RESUME_PDF must point to an existing PDF."
         )
     base_tex = base_tex_path.read_text(encoding="utf-8", errors="replace")
+    intro_md = context_loader.get_introduction_markdown(profile_md)
 
     for job in jobs:
         result.attempted += 1
@@ -133,6 +134,7 @@ def run_module3(
                 system_instruction=prompts.MATERIALS_SYSTEM,
                 user_text=prompts.materials_user_prompt(
                     job_bundle=bundle,
+                    introduction_markdown=intro_md,
                     base_resume_latex=base_tex,
                     project_excerpts=project_excerpts,
                 ),
