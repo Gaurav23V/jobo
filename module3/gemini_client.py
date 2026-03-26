@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
+MODELS = ("gemini-3-flash-preview", "gemini-3.1-pro-preview")
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -31,12 +32,11 @@ def _parse_or_raise(raw: str, response_model: type[T]) -> T:
 
 def generate_structured(
     *,
-    model: str,
     system_instruction: str,
     user_text: str,
     response_model: type[T],
 ) -> T:
-    """Call Gemini with JSON schema; retry up to 3 times with exponential backoff (60s, 120s, 240s)."""
+    """Call Gemini with JSON schema; retry up to 3 times with exponential backoff (60s, 120s, 240s) across two models."""
     client = _client()
     schema = response_model.model_json_schema()
     max_attempts = 4
@@ -50,48 +50,54 @@ def generate_structured(
 
     last_err: str | None = None
     for attempt in range(max_attempts):
-        if attempt > 0:
-            delay = backoff_sec[attempt - 1]
+        for model in MODELS:
+            try:
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=user_text,
+                    config=config,
+                )
+                raw = (resp.text or "").strip()
+            except Exception as e:
+                last_err = f"{model}: {e}"
+                logger.warning(
+                    "Gemini request failed (attempt %s/%s, model=%s): %s",
+                    attempt + 1,
+                    max_attempts,
+                    model,
+                    e,
+                )
+                break
+            if not raw:
+                last_err = f"{model}: empty response"
+                logger.warning(
+                    "Gemini empty response (attempt %s/%s, model=%s)",
+                    attempt + 1,
+                    max_attempts,
+                    model,
+                )
+                break
+            try:
+                return _parse_or_raise(raw, response_model)
+            except (ValidationError, ValueError) as e:
+                last_err = f"{model}: parse: {e}"
+                logger.warning(
+                    "Gemini JSON parse failed (attempt %s/%s, model=%s): %s",
+                    attempt + 1,
+                    max_attempts,
+                    model,
+                    e,
+                )
+                break
+
+        if attempt < max_attempts - 1:
+            delay = backoff_sec[attempt]
             logger.info(
-                "Gemini structured call retry %s/%s after %s s backoff",
-                attempt + 1,
+                "Gemini retry %s/%s after %s s backoff",
+                attempt + 2,
                 max_attempts,
                 delay,
             )
             time.sleep(delay)
-        try:
-            resp = client.models.generate_content(
-                model=model,
-                contents=user_text,
-                config=config,
-            )
-            raw = (resp.text or "").strip()
-        except Exception as e:
-            last_err = str(e)
-            logger.warning(
-                "Gemini request failed (attempt %s/%s): %s",
-                attempt + 1,
-                max_attempts,
-                e,
-            )
-            continue
-        if not raw:
-            last_err = "empty response text"
-            logger.warning(
-                "Gemini empty response (attempt %s/%s)",
-                attempt + 1,
-                max_attempts,
-            )
-            continue
-        try:
-            return _parse_or_raise(raw, response_model)
-        except (ValidationError, ValueError) as e:
-            last_err = f"parse: {e}"
-            logger.warning(
-                "Gemini JSON parse failed (attempt %s/%s): %s",
-                attempt + 1,
-                max_attempts,
-                e,
-            )
 
     raise RuntimeError(f"Gemini structured call failed after retries: {last_err}")

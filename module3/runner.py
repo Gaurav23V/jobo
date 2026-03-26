@@ -49,7 +49,6 @@ def run_module3(
     min_score: int | None = None,
 ) -> Module3Result:
     threshold = min_score if min_score is not None else constants.min_fit_score_apply()
-    model = constants.gemini_model()
     profile_path = constants.profile_context_path()
     jobs = query.list_jobs_for_module3(session, force=force)
     result = Module3Result()
@@ -65,13 +64,9 @@ def run_module3(
     base_tex_path = constants.base_resume_tex_path()
     default_pdf_path = constants.default_resume_pdf_path()
     if base_tex_path is None or not base_tex_path.is_file():
-        raise RuntimeError(
-            "JOBO_BASE_RESUME_TEX must point to an existing .tex file."
-        )
+        raise RuntimeError("JOBO_BASE_RESUME_TEX must point to an existing .tex file.")
     if default_pdf_path is None or not default_pdf_path.is_file():
-        raise RuntimeError(
-            "JOBO_DEFAULT_RESUME_PDF must point to an existing PDF."
-        )
+        raise RuntimeError("JOBO_DEFAULT_RESUME_PDF must point to an existing PDF.")
     base_tex = base_tex_path.read_text(encoding="utf-8", errors="replace")
     intro_md = context_loader.get_introduction_markdown(profile_md)
 
@@ -85,7 +80,6 @@ def run_module3(
                 result.phase1_skipped += 1
             else:
                 fit = gemini_client.generate_structured(
-                    model=model,
                     system_instruction=prompts.FIT_SYSTEM,
                     user_text=prompts.fit_user_prompt(
                         profile_markdown=profile_md,
@@ -119,18 +113,17 @@ def run_module3(
 
             raw_hl = job.module3_highlighted_projects or "[]"
             try:
-                hl_list = json.loads(raw_hl)
+                project_list = json.loads(raw_hl)
             except json.JSONDecodeError:
-                hl_list = []
-            if not isinstance(hl_list, list):
-                hl_list = []
+                project_list = []
+            if not isinstance(project_list, list):
+                project_list = []
             project_excerpts = context_loader.get_project_bodies(
                 profile_md,
-                [str(x) for x in hl_list],
+                [str(x) for x in project_list],
             )
 
             mats = gemini_client.generate_structured(
-                model=model,
                 system_instruction=prompts.MATERIALS_SYSTEM,
                 user_text=prompts.materials_user_prompt(
                     job_bundle=bundle,

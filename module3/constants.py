@@ -7,8 +7,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 FIT_SCORE_MIN_APPLY = 3
 
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
-
 DEFAULT_PROFILE_REL = Path("module3/context/profile.md")
 DEFAULT_ARTIFACTS_REL = Path("data/module3/artifacts")
 
