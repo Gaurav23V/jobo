@@ -102,6 +102,13 @@ Common mistakes to avoid:
 ## One-page constraint
 
 - The compiled résumé should stay **one page**. When substituting text for an existing bullet or line, keep **roughly the same length** (similar line count and character count) as what you replaced.
+- **Projects section bullet count**: Follow the **exact pattern** from the base résumé template:
+  - Each project entry uses `\\resumeSubItem{...}` with a nested `itemize` environment
+  - Most projects should have **2 bullet points** (see Voxi and TexForge in base template)
+  - A project may have **1 bullet point only** if the content genuinely warrants it (see Webhook Delivery Service in base template)
+  - **Never reduce a project to 1 bullet if 2 bullets of meaningful content exist** — having 1 bullet per project makes the page feel sparse
+  - Conversely, **do not add a second bullet to a project that only has 1 meaningful point**
+- **Length per bullet**: Keep each bullet **concise and information-dense** — roughly 1–3 lines max. Do not pad with verbose filler.
 
 ## ATS / readability
 
