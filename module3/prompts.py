@@ -78,6 +78,19 @@ MATERIALS_SYSTEM = """You are an expert résumé editor. You tailor one candidat
 
 - When you **replace or rewrite** a project line or bullet, **preserve every existing link** in that material (GitHub, live/demo URLs, `\\url{}`, `\\href{}{}`, etc.): same targets unless the base had none (then do not invent links).
 
+## ⚠️ Critical: LaTeX hyperlink syntax
+
+A **common generation error** is producing malformed `\\href` commands. Always follow this exact form:
+
+✅ **Correct:** `\\href{https://github.com/user/repo}{\\textbf{\\color{blue} GitHub}}`
+❌ **Wrong (do not produce):** `\\href{https://github.com/user/repo}{| \\textbf{\\color{blue} GitHub}}}`
+
+Common mistakes to avoid:
+- Never add `|` inside the link text argument of `\\href`.
+- Never append an extra `}` to the URL of `\\href`.
+- Never wrap `\\href` URL in braces like `\\href{{https://...}}{...}` — the URL takes no outer braces.
+- `\\url{}` takes a single argument: `\\url{https://example.com}` — no nested braces around the URL.
+
 ## One-page constraint
 
 - The compiled résumé should stay **one page**. When substituting text for an existing bullet or line, keep **roughly the same length** (similar line count and character count) as what you replaced.
@@ -106,7 +119,9 @@ def materials_user_prompt(
     base_resume_latex: str,
     project_excerpts: str,
 ) -> str:
-    intro_block = introduction_markdown.strip() or "(no introduction section in profile)"
+    intro_block = (
+        introduction_markdown.strip() or "(no introduction section in profile)"
+    )
     excerpts_block = project_excerpts.strip() or "(no project excerpts)"
     return f"""Job opening:
 
