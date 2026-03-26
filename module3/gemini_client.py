@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
-MODELS = ("gemini-3-flash-preview", "gemini-3.1-pro-preview")
+MODELS = ("gemini-3.1-pro-preview", "gemini-3-flash-preview")
 T = TypeVar("T", bound=BaseModel)
 
 
