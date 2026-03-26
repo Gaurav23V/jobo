@@ -50,7 +50,7 @@ def generate_structured(
 
     last_err: str | None = None
     for attempt in range(max_attempts):
-        for model in MODELS:
+        for i, model in enumerate(MODELS):
             logger.info("Attempt %s/%s: model=%s", attempt + 1, max_attempts, model)
             try:
                 resp = client.models.generate_content(
@@ -62,16 +62,22 @@ def generate_structured(
             except Exception as e:
                 last_err = f"{model}: {e}"
                 logger.warning("Gemini request failed: %s", e)
+                if i < len(MODELS) - 1:
+                    logger.info("Trying next model: %s", MODELS[i + 1])
                 break
             if not raw:
                 last_err = f"{model}: empty response"
                 logger.warning("Gemini empty response")
+                if i < len(MODELS) - 1:
+                    logger.info("Trying next model: %s", MODELS[i + 1])
                 break
             try:
                 return _parse_or_raise(raw, response_model)
             except (ValidationError, ValueError) as e:
                 last_err = f"{model}: parse: {e}"
                 logger.warning("Gemini JSON parse failed: %s", e)
+                if i < len(MODELS) - 1:
+                    logger.info("Trying next model: %s", MODELS[i + 1])
                 break
 
         if attempt < max_attempts - 1:
