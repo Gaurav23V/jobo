@@ -384,6 +384,11 @@ I've proven I can work under stressful, high-velocity conditions — the kind wh
 - **Stack:** Python, PyTorch, NumPy, Matplotlib
 - **Description:** An educational implementation project for "The Annotated Transformer" - a line-by-line annotated implementation of the Transformer architecture as introduced in the seminal "Attention Is All You Need" paper by Vaswani et al. (2017). The project is designed as a learning resource for understanding Transformers from first principles. It covers the core Transformer components: Multi-Head Attention mechanism, Positional Encoding for permutation-invariant sequences, Position-wise Feed-Forward Networks, stacked Encoder and Decoder layers, Layer Normalization, and Label Smoothing regularization. Key concepts explored include self-attention, scaled dot-product attention, residual connections, batch masking for variable-length sequences, and decoding strategies (greedy/beam search). The tech stack uses Python with PyTorch and Jupyter Notebook. The project currently serves as a placeholder with a single notebook file (notebook.ipynb) awaiting completion by following the annotated transformer tutorial methodology.
 
+## triad
+- **GitHub:** https://github.com/Gaurav23V/triad
+- **Stack:** Nakama, TypeScript, React, Vite, Docker, PostgreSQL, WebSocket
+- **Description:** A multiplayer tic-tac-toe game built with a server-authoritative, real-time architecture where game rules, turn validation, win/draw detection, per-turn timers, disconnect handling, and stats all run in Nakama. The React client uses @heroiclabs/nakama-js over HTTP and WebSocket for real-time communication. Features include anonymous device ID authentication, quick match matchmaking via Nakama matchmaker, create/join rooms by code, Classic mode (no timer) and Speed mode (~30s per turn), grace period with optional claim forfeit for disconnects, and a leaderboard tracking wins/losses/draws/streaks. Docker Compose orchestrates Postgres, Nakama, and the built SPA for local development.
+
 ## TV-Show-Search-APP
 - **GitHub:** https://github.com/Gaurav23V/TV-Show-Search-APP
 - **Stack:** HTML, CSS, JavaScript, Axios
