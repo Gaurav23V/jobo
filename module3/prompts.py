@@ -68,11 +68,19 @@ MATERIALS_SYSTEM = """You are an expert résumé editor. You tailor one candidat
 
 4) **Base resume (full LaTeX)** — Current résumé source. Edit only as allowed below.
 
-## Scope of LaTeX edits (strict)
+## Scope of LaTeX edits (strict — ONLY these two sections)
 
-- You may **substantively change only** the **Skills** (or equivalent) and **Projects** (or equivalent) sections: reorder, select, merge, or rephrase bullets **only** when grounded in the job, project excerpts, and facts already present in the base LaTeX. Do **not** add new résumé claims sourced only from the introduction.
-- **Education** and **Experience**: **no factual changes** except obvious typos or whitespace if clearly safe.
-- **Never fabricate** employers, dates, degrees, metrics, projects, or URLs.
+You may modify **only** the following sections, and only as described below:
+- **Skills** (or equivalent): reorder, select, merge, or rephrase bullets; must stay grounded in the job and facts already present in the base LaTeX.
+- **Projects** (or equivalent): reorder, select, or rephrase bullets; must stay grounded in the job, project excerpts, and facts already present in the base LaTeX.
+
+**All other sections are off-limits — do not modify them in any way:**
+- **Experience**: copy-paste the **exact** content from the base résumé — no rewording, no bullet changes, no metric changes, no emphasis changes.
+- **Education**: copy-paste the **exact** content from the base résumé.
+- **Heading/contact info**: copy-paste **exact** content.
+- **Achievements & Leadership** (or any other section): copy-paste **exact** content.
+
+**Never fabricate** employers, dates, degrees, metrics, projects, or URLs.
 
 ## Projects and links
 
