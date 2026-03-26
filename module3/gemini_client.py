@@ -51,6 +51,7 @@ def generate_structured(
     last_err: str | None = None
     for attempt in range(max_attempts):
         for model in MODELS:
+            logger.info("Attempt %s/%s: model=%s", attempt + 1, max_attempts, model)
             try:
                 resp = client.models.generate_content(
                     model=model,
@@ -60,43 +61,23 @@ def generate_structured(
                 raw = (resp.text or "").strip()
             except Exception as e:
                 last_err = f"{model}: {e}"
-                logger.warning(
-                    "Gemini request failed (attempt %s/%s, model=%s): %s",
-                    attempt + 1,
-                    max_attempts,
-                    model,
-                    e,
-                )
+                logger.warning("Gemini request failed: %s", e)
                 break
             if not raw:
                 last_err = f"{model}: empty response"
-                logger.warning(
-                    "Gemini empty response (attempt %s/%s, model=%s)",
-                    attempt + 1,
-                    max_attempts,
-                    model,
-                )
+                logger.warning("Gemini empty response")
                 break
             try:
                 return _parse_or_raise(raw, response_model)
             except (ValidationError, ValueError) as e:
                 last_err = f"{model}: parse: {e}"
-                logger.warning(
-                    "Gemini JSON parse failed (attempt %s/%s, model=%s): %s",
-                    attempt + 1,
-                    max_attempts,
-                    model,
-                    e,
-                )
+                logger.warning("Gemini JSON parse failed: %s", e)
                 break
 
         if attempt < max_attempts - 1:
             delay = backoff_sec[attempt]
             logger.info(
-                "Gemini retry %s/%s after %s s backoff",
-                attempt + 2,
-                max_attempts,
-                delay,
+                "Retry %s/%s after %ss backoff", attempt + 2, max_attempts, delay
             )
             time.sleep(delay)
 
