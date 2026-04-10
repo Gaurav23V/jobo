@@ -50,7 +50,7 @@ At Upvalue, I built web crawlers for automated data collection, improving extrac
 
 Outside of work, I build things that scratch my own itch:
 
-- **Voxi** — a local voice dictation tool for Linux, using a Go daemon and Python ML worker over Unix socket JSON-RPC, targeting sub-2-second end-to-end latency
+- **Voxi** — a fast, local, GPU-accelerated voice dictation tool for Linux (GNOME), using a Python daemon with Nvidia Parakeet ASR and a lightweight CLI client over Unix Domain Sockets, keeping the model warm in VRAM for instant startup
 - **WebhookDelivery Service** — processes 5,000+ deliveries daily with 99.9% reliability, with exponential backoff retry cutting failures by 85%
 - **TexForge** — a full-stack sandboxed LaTeX editor with real-time PDF compilation, autosave, and tokenized sharing
 
@@ -401,8 +401,8 @@ I've proven I can work under stressful, high-velocity conditions — the kind wh
 
 ## voxi
 - **GitHub:** https://github.com/Gaurav23V/voxi
-- **Stack:** Go, Python, PipeWire, Parakeet ASR, Ollama, systemd
-- **Description:** A local voice dictation tool for GNOME on Fedora that enables voice-to-text transcription inserted directly into focused applications. The architecture follows a hotkey-triggered state machine: pressing Super+I toggles recording via PipeWire, the recorded audio is transcribed locally using NVIDIA's Parakeet TDT ASR model, cleaned up using Ollama (gemma3:4b), and inserted via wtype with wl-copy clipboard fallback. The system comprises a Go CLI/daemon managing state machine transitions (Idle, Recording, Processing, Inserting), a Python ML worker handling ASR and LLM cleanup, and Unix socket JSON RPC communication between components. The Go daemon supervises the Python worker, handles PipeWire recording, desktop notifications, and insertion with retry logic. Key features include structured JSON logging for debugging and monitoring, systemd user service integration, a voxi doctor command for dependency checks (binaries, Ollama reachability, NVIDIA driver via nvidia-smi, CUDA vs CPU fallback detection), and voxi rebuild for development iteration. The MVP intentionally excludes streaming transcription, transcript editor UI, and multi-language support.
+- **Stack:** Python, Nvidia Parakeet ASR, sounddevice, Unix Domain Sockets, systemd, wl-clipboard
+- **Description:** A fast, local, GPU-accelerated voice dictation tool for Linux (GNOME), powered by Nvidia Parakeet. Uses a client-server architecture: a background Python daemon keeps the Parakeet model warm in GPU VRAM for instant startup, while a lightning-fast CLI client (`voxi-toggle`) sends toggle commands via Unix Domain Sockets (`/tmp/voxi.sock`). Workflow — press a global shortcut once to start recording (🔴 Listening notification), press again to stop; the daemon transcribes on GPU, copies the result to the clipboard, and fires a ✅ Copied notification. The daemon handles audio capture via `sounddevice`, transcription, clipboard output (wl-clipboard/xclip fallback), and all desktop notifications (`notify-send`). Includes a one-shot `install.sh` for full setup (system dependencies, venv, symlinks, systemd service registration), a `fix_nvidia_suspend.sh` script to preserve VRAM across sleep/wake cycles, and `pyproject.toml` managed by `uv`. Tested on Debian 13 with an RTX 3050 6GB.
 
 ## wbc_classification
 - **GitHub:** https://github.com/Gaurav23V/wbc_classification
