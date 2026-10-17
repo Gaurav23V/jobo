@@ -450,6 +450,22 @@ opt-in tests that drive the real apply agent against local test pages, such as
 `scripts/test_pipeline_controls_e2e.py`, are not part of the suite; their
 docstrings say how to run them. The full suite takes about ten minutes.
 
+Before merging a branch, run the merge gate from its worktree (after `git fetch
+origin`):
+
+```bash
+bash scripts/premerge_check.sh                       # checks origin/main..HEAD
+bash scripts/premerge_check.sh --no-new-test-ok      # tooling/docs-only change
+```
+
+It exits 0 only if every check passes: commit author and committer identity
+with no attribution trailers, gitleaks finds no secrets, the lines the branch
+adds have no hits from the local personal-terms list (`.privacy/terms.txt` in
+the main checkout, gitignored), nothing is added under `personal/`, `data/`,
+`credentials/` or `.privacy/` (and no `.env*`, database, PDF or TeX file), the
+full suite is green, and a `scripts/test_*` file is added or changed. It prints
+counts and file names, never the matched value.
+
 ## Limits and caveats
 
 - **It submits real applications in your name.** Every form it completes goes to

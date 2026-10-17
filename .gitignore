@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.sqlite
 *.egg-info/
+# no trailing slash: worktrees symlink .venv to the live checkout's
+.venv
 
 # Environment
 .env
