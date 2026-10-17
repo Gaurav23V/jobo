@@ -102,6 +102,11 @@ class JobModel(Base):
     # module4/outcome_taxonomy.py. module4_last_status stays free text (the
     # human-readable reason); this column is what the funnel metric groups by.
     module4_outcome = Column(String, nullable=True)
+    # Post-enrich rule filter (policy/job_filters.py, `jobo prefilter`): the
+    # reason key when the row was dropped before triage, else NULL. A dropped
+    # row also gets should_apply=False and a "prefilter: <reason>" note in
+    # module3_fit_reasoning; module 3 never selects it.
+    prefilter_reason = Column(String, nullable=True)
 
     def to_job(self) -> Job:
         return Job(

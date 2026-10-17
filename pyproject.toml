@@ -7,7 +7,7 @@ py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["db", "jobo_setup", "module1", "module2", "module3", "module4", "policy"]
+include = ["db", "jobo_setup", "module1", "module2", "module3", "module4", "policy", "sources"]
 
 [project]
 name = "jobo"

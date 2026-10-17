@@ -3,7 +3,8 @@ from typing import Optional
 
 from module1.collector import fetch_emails
 from module1.parser import parse_email_to_jobs
-from module1.store import get_existing_job_urls, upsert_job
+from sources.base import JobCandidate
+from sources.store import insert_candidates
 from sqlalchemy.orm import Session
 
 
@@ -54,25 +55,25 @@ def run(session: Session, hours: int = 24, dry_run: bool = False) -> CollectorRe
             logger.info(f"  - {email.subject} from {email.sender}")
         return result
 
-    existing_urls = get_existing_job_urls(session)
-
+    candidates: list[JobCandidate] = []
     for email in emails:
         try:
             jobs = parse_email_to_jobs(email)
             result.jobs_extracted += len(jobs)
-
-            for job in jobs:
-                if job.job_url in existing_urls:
-                    result.duplicate_jobs += 1
-                    continue
-
-                existing_urls.add(job.job_url)
-                upsert_job(session, job)
-                result.new_jobs += 1
-
+            candidates.extend(
+                JobCandidate(job_url=job.job_url, source=job.source_platform or "linkedin")
+                for job in jobs
+            )
         except Exception as e:
             logger.error(f"Failed to parse email {email.message_id}: {e}")
             result.errors.append(f"Parse error ({email.message_id}): {e}")
+
+    # The shared insert path: cross-source dedup (url, LinkedIn id,
+    # company+title), then insert un-enriched rows for module 2.
+    inserted = insert_candidates(session, candidates)
+    result.new_jobs = inserted.inserted
+    result.duplicate_jobs = inserted.duplicates
+    result.errors.extend(f"Insert error: {e}" for e in inserted.errors)
 
     logger.info(
         f"Collection complete: {result.jobs_extracted} jobs, {result.new_jobs} new, {result.updated_jobs} updated"

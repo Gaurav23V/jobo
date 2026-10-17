@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
@@ -6,7 +7,9 @@ from sqlalchemy.pool import StaticPool
 
 from db.models import Base
 
-DB_PATH = Path(__file__).parent.parent / "data" / "jobs.db"
+# JOBO_DB_PATH points every stage at another database file (a copy for dry
+# runs and end-to-end checks). Unset = the live data/jobs.db.
+DB_PATH = Path(os.environ.get("JOBO_DB_PATH") or Path(__file__).parent.parent / "data" / "jobs.db")
 DB_URL = f"sqlite:///{DB_PATH}"
 
 
@@ -109,12 +112,37 @@ def _ensure_jobs_module4_columns() -> None:
             conn.execute(text(stmt))
 
 
+def _ensure_jobs_prefilter_column() -> None:
+    """Add the post-enrich rule-filter column (policy/job_filters.py)."""
+    inspector = inspect(engine)
+    if not inspector.has_table("jobs"):
+        return
+    columns = {c["name"] for c in inspector.get_columns("jobs")}
+    if "prefilter_reason" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN prefilter_reason VARCHAR"))
+
+
+def _ensure_source_state_table() -> None:
+    """Per-source collection cursor (sources/jobfound.py)."""
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS source_state ("
+                "source TEXT PRIMARY KEY, cursor TEXT, updated_at DATETIME)"
+            )
+        )
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_jobs_module2_attempted_column()
     _ensure_jobs_module2_enrichment_columns()
     _ensure_jobs_module3_columns()
     _ensure_jobs_module4_columns()
+    _ensure_jobs_prefilter_column()
+    _ensure_source_state_table()
 
 
 def get_session() -> Session:

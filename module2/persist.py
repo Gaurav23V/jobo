@@ -45,6 +45,17 @@ def _format_module2_last_error(
     return text
 
 
+def _bookkeeping_keys(metadata_json: Optional[str]) -> dict:
+    """The ``_``-prefixed jobo keys (``_sources`` ...) of the old metadata, kept across enrichment."""
+    try:
+        old = json.loads(metadata_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(old, dict):
+        return {}
+    return {k: v for k, v in old.items() if k.startswith("_")}
+
+
 def save_enrichment_result(
     session: Session,
     job: JobModel,
@@ -57,7 +68,7 @@ def save_enrichment_result(
     """Persist Module 2 outcome.
 
     Success: ``metadata_json`` is replaced with the job-only ``job_metadata`` object
-    as JSON; sets ``module2_enriched_at``, ``module2_model``, clears
+    as JSON, keeping the old ``_``-prefixed bookkeeping keys (``_sources``); sets ``module2_enriched_at``, ``module2_model``, clears
     ``module2_last_error``.
 
     Failure: leaves ``metadata_json`` unchanged; sets ``module2_last_error``;
@@ -75,7 +86,7 @@ def save_enrichment_result(
         return
 
     job.metadata_json = json.dumps(
-        enrichment.job_metadata,
+        {**enrichment.job_metadata, **_bookkeeping_keys(job.metadata_json)},
         default=str,
         ensure_ascii=False,
     )
