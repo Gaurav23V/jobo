@@ -1,5 +1,5 @@
 #!/bin/bash
-# jobo daily pipeline: collector -> enrich -> triage -> apply
+# jobo daily pipeline: collector -> jobfound -> enrich -> prefilter -> triage -> apply
 # Runs via cron at 10:00 and 22:00 IST. All state lives in data/jobs.db;
 # every stage is idempotent so reruns never duplicate work.
 #
@@ -179,8 +179,25 @@ if grep -qE 'invalid_grant|Requested entity was not found|HttpError 401' "$LOG";
   exit 2
 fi
 
+# Stage 1b: jobfound.org (sources/jobfound.py). Rows arrive already enriched
+# from jobfound's own data, filtered and deduplicated against every source.
+# A failure here is recorded but never stops the run (the email jobs still go
+# through). JOBO_JOBFOUND_ENABLED=0 turns the stage off. It runs after the
+# Gmail-auth check above, so its output can never trip that check.
+if [ "${JOBO_JOBFOUND_ENABLED:-1}" = "0" ]; then
+  log "=== jobfound disabled (JOBO_JOBFOUND_ENABLED=0) ==="
+  STAGE_VERDICTS+=("jobfound:DISABLED")
+elif ! run_stage "jobfound" collect-jobfound --quiet; then
+  FAILED=1
+fi
+
 # Stage 2: enrich un-enriched rows only (module2_attempted flag gates it).
 if ! run_stage "enrich" enrich; then FAILED=1; fi
+
+# Stage 2b: rule filters (policy/job_filters.py) on enriched, unscored rows of
+# every source. Dropped rows get prefilter_reason and are never triaged, so
+# they cost no Claude. No Claude here, so it runs before the triage gate.
+if ! run_stage "prefilter" prefilter --quiet; then FAILED=1; fi
 
 # Re-check before triage: collector/enrich can take a while, and triage is the
 # first stage that spends Claude (`claude -p`). Apply re-checks between jobs.

@@ -30,6 +30,12 @@ should_apply + tailored resume PDF + cover letter PDF
 application submitted / skipped / failed, recorded per job
 ```
 
+A second source, jobfound.org (`sources/jobfound.py`, `jobo collect-jobfound`),
+stores jobs that are already enriched from the site's own data, so they skip
+module 2. Every source goes through one insert path with cross-source dedup,
+and rule filters (`policy/job_filters.py`, `jobo prefilter`) drop unwanted jobs
+before triage. See [docs/sources.md](docs/sources.md).
+
 Every stage reads its input from `data/jobs.db` and writes its result back, and
 every stage skips work that is already done, so a run can be stopped and started
 again without doing anything twice.
@@ -116,6 +122,7 @@ up.
 | `main.py` | the `jobo` CLI (Click) |
 | `db/` | SQLAlchemy model of the `jobs` table and in-place SQLite migrations |
 | `module1/` … `module4/` | the four stages above |
+| `sources/` | the source seam: `JobCandidate`, URL normalization, the shared insert path with dedup, the jobfound.org collector (`docs/sources.md`) |
 | `policy/` | your personal config loader (`personal.py`), employer blocklist, paused sites |
 | `hermes_plugin/jobo-browser/` | the Hermes plugin used by the apply agent |
 | `jobo_setup/` | `./setup.sh` wizard and `jobo doctor` |
@@ -276,9 +283,12 @@ use most:
 | Command | What it does |
 | ------- | ------------ |
 | `jobo collector [--hours N] [--dry-run]` | read job alerts from the last N hours (default 168) into `data/jobs.db` |
+| `jobo collect-jobfound [--dry-run] [--quiet]` | read new jobs from jobfound.org, filter and dedup them, and store them already enriched (see `docs/sources.md`) |
 | `jobo enrich [--job-id ID] [--force] [--dry-run]` | read the pages of jobs not read yet |
+| `jobo prefilter [--dry-run] [--quiet]` | drop enriched, unscored jobs that fail the rule filters (`policy/job_filters.py`) before triage; no Claude |
 | `jobo triage [--job-id ID] [--min-score N] [--queued] [--force] [--dry-run]` | score fit and make resume/cover PDFs; `--queued` redoes only the jobs waiting to be applied to (after you change your resume or profile) |
 | `jobo apply [--limit N] [--job-id ID] [--form-workers N]` | **submit real applications** |
+| `jobo apply --plan [--job-id ID] [--limit N]` | print how each queued job would be routed (ATS kind, blocklist, paused site, LinkedIn preflight, which worker); opens nothing, writes nothing |
 | `jobo apply --form-workers N --canary-only` | start the apply browsers, check the agent can attach to them, and stop: no job is claimed, nothing is applied |
 | `jobo funnel [--since DATE] [--until DATE] [--run-log FILE]` | share of `should_apply` jobs actually submitted |
 | `jobo budget-gate --stage NAME` | print the current Claude usage reading and whether a run may start (uses no tokens) |
@@ -286,12 +296,15 @@ use most:
 
 **`jobo apply --dry-run` is not a dry run.** It still runs the real apply agent
 on real forms; it only skips writing the result to the database. Use
-`--canary-only` when you want to test the apply setup without applying.
+`--canary-only` when you want to test the apply setup without applying, and
+`--plan` to see where each job would go.
 
 ### The daily pipeline
 
-`scripts/daily_pipeline.sh` runs the four stages in order: budget check,
-`collector --hours 168`, `enrich`, budget check, `triage`, `apply
+`scripts/daily_pipeline.sh` runs the stages in order: budget check,
+`collector --hours 168`, `collect-jobfound` (`JOBO_JOBFOUND_ENABLED=0` turns it
+off; a failure there does not stop the run), `enrich`, `prefilter`, budget
+check, `triage`, `apply
 --form-workers 3` (`JOBO_APPLY_FORM_WORKERS`). It writes a log per run to
 `data/logs/run_<YYYYMMDD_HHMM>.log` and one JSON verdict line per run to
 `data/logs/pipeline_verdicts.jsonl` (`OK`, `FAILED`, `SKIPPED_BUDGET`,

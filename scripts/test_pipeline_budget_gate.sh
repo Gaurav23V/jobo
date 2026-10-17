@@ -53,6 +53,11 @@ if [ "$1" = "budget-gate" ]; then
   exec "$STUB_PY" -B "$STUB_DIR/gate_stub.py" "$@"
 fi
 echo "$1 override=${JOBO_BUDGET_OVERRIDE:-}" >> "$STAGES_FILE"
+# FAKE_STAGE_OUT_<command> is printed (e.g. a Gmail auth error); a command in
+# FAKE_FAIL_STAGES (space separated) exits 1.
+var="FAKE_STAGE_OUT_${1//-/_}"
+[ -n "${!var:-}" ] && echo "${!var}"
+case " ${FAKE_FAIL_STAGES:-} " in *" $1 "*) echo "stub $1 failed"; exit 1 ;; esac
 echo "stub $1 ok"
 EOF
 chmod +x "$TMP/bin/uv"
@@ -100,7 +105,7 @@ echo
 echo "2. Proceed path: 40% -> every stage runs, verdict OK with the gate result"
 run_pipeline "0.40"
 check "$([ "$RC" -eq 0 ] && echo yes || echo no)" "exit 0 (rc=$RC)"
-check "$([ "$(stages)" = "collector enrich triage apply" ] && echo yes || echo no)" "all four stages ran (ran: '$(stages)')"
+check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "all six stages ran (ran: '$(stages)')"
 check "$([ "$(verdict 'v["overall"]')" = OK ] && echo yes || echo no)" "verdict overall OK"
 check "$([ "$(verdict 'v["budget"]["decision"]')" = PROCEED ] && echo yes || echo no)" "verdict carries the last gate decision (PROCEED)"
 check "$([ "$(cat "$TMP/counter")" = 2 ] && echo yes || echo no)" "gate checked twice (start + before triage)"
@@ -110,7 +115,7 @@ check "$([ "$(verdict 'v["budget"]["session_utilization"]')" = 0.22 ] && echo ye
 echo
 echo "3. Override flag: 90% + --budget-override -> runs, and apply gets the override"
 run_pipeline "0.90" -- --budget-override
-check "$([ "$(stages)" = "collector enrich triage apply" ] && echo yes || echo no)" "all four stages ran (ran: '$(stages)')"
+check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "all six stages ran (ran: '$(stages)')"
 check "$(grep -q '^apply override=1$' "$TMP/stages" && echo yes || echo no)" "apply stage sees JOBO_BUDGET_OVERRIDE=1 (between-jobs stop off)"
 check "$([ "$(verdict 'v["budget"]["decision"]')" = OVERRIDE ] && echo yes || echo no)" "verdict decision OVERRIDE"
 check "$(loggrep 'JOBO_BUDGET_OVERRIDE is set')" "run log says the override was used"
@@ -118,15 +123,15 @@ check "$(loggrep 'JOBO_BUDGET_OVERRIDE is set')" "run log says the override was 
 echo
 echo "4. Override env: 90% + JOBO_BUDGET_OVERRIDE=1 -> runs"
 run_pipeline "0.90" JOBO_BUDGET_OVERRIDE=1
-check "$([ "$(stages)" = "collector enrich triage apply" ] && echo yes || echo no)" "all four stages ran (ran: '$(stages)')"
+check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "all six stages ran (ran: '$(stages)')"
 
 echo
 echo "5. Crossing mid-run: 40% at start, 60% before triage -> stops before triage"
 run_pipeline "0.40,0.60"
 check "$([ "$RC" -eq 0 ] && echo yes || echo no)" "exit 0 (rc=$RC)"
-check "$([ "$(stages)" = "collector enrich" ] && echo yes || echo no)" "only collector+enrich ran (ran: '$(stages)')"
+check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter" ] && echo yes || echo no)" "only collector+jobfound+enrich+prefilter ran (ran: '$(stages)')"
 check "$([ "$(verdict 'v["overall"]')" = STOPPED_BUDGET ] && echo yes || echo no)" "verdict overall STOPPED_BUDGET"
-check "$([ "$(verdict '",".join(s["stage"]+":"+s["verdict"] for s in v["stages"])')" = "collector:OK,enrich:OK,triage:SKIPPED_BUDGET,apply:SKIPPED_BUDGET" ] && echo yes || echo no)" "stage verdicts show triage/apply skipped for budget"
+check "$([ "$(verdict '",".join(s["stage"]+":"+s["verdict"] for s in v["stages"])')" = "collector:OK,jobfound:OK,enrich:OK,prefilter:OK,triage:SKIPPED_BUDGET,apply:SKIPPED_BUDGET" ] && echo yes || echo no)" "stage verdicts show triage/apply skipped for budget"
 check "$([ "$(verdict 'v["budget"]["gate"]')" = triage ] && echo yes || echo no)" "verdict records the triage gate"
 
 echo
@@ -137,14 +142,14 @@ check "$([ -z "$(stages)" ] && [ "$(verdict 'v["overall"]')" = SKIPPED_BUDGET ] 
 echo
 echo "7. Unreadable usage -> proceeds as before, logged clearly"
 run_pipeline "none"
-check "$([ "$(stages)" = "collector enrich triage apply" ] && echo yes || echo no)" "all four stages ran (ran: '$(stages)')"
+check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "all six stages ran (ran: '$(stages)')"
 check "$(loggrep 'weekly Claude usage UNREADABLE (usage endpoint unreadable')" "run log says UNREADABLE and why"
 check "$([ "$(verdict 'v["budget"]["decision"]')" = PROCEED_UNREADABLE ] && echo yes || echo no)" "verdict decision PROCEED_UNREADABLE"
 
 echo
 echo "8. The gate command itself crashing -> proceeds, logged, verdict stays valid JSON"
 run_pipeline "crash"
-check "$([ "$(stages)" = "collector enrich triage apply" ] && echo yes || echo no)" "all four stages ran (ran: '$(stages)')"
+check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "all six stages ran (ran: '$(stages)')"
 check "$(loggrep 'the gate command itself failed (exit 1)')" "run log says the gate failed"
 check "$([ "$(verdict 'v["budget"]["decision"]')" = GATE_ERROR ] && echo yes || echo no)" "verdict decision GATE_ERROR"
 
@@ -160,6 +165,31 @@ echo
 echo "9. Unknown script argument is refused before anything runs"
 run_pipeline "0.10" -- --bogus
 check "$([ "$RC" -eq 64 ] && [ -z "$(stages)" ] && echo yes || echo no)" "exit 64, nothing ran (rc=$RC)"
+
+echo
+echo "11. jobfound stage fails -> the run goes on, its verdict says FAILED (GHO-41)"
+run_pipeline "0.10" FAKE_FAIL_STAGES=collect-jobfound
+check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "every stage still ran (ran: '$(stages)')"
+check "$([ "$RC" -eq 1 ] && [ "$(verdict 'v["overall"]')" = FAILED ] && echo yes || echo no)" "exit 1, overall FAILED (rc=$RC)"
+check "$([ "$(verdict '",".join(s["stage"]+":"+s["verdict"] for s in v["stages"])')" = "collector:OK,jobfound:FAILED,enrich:OK,prefilter:OK,triage:OK,directsdk_patch:OK,apply:OK" ] && echo yes || echo no)" "stage verdicts: jobfound:FAILED, the rest OK"
+
+echo
+echo "12. JOBO_JOBFOUND_ENABLED=0 -> jobfound stage off, verdict DISABLED"
+run_pipeline "0.10" JOBO_JOBFOUND_ENABLED=0
+check "$([ "$(stages)" = "collector enrich prefilter triage apply" ] && echo yes || echo no)" "jobfound did not run (ran: '$(stages)')"
+check "$([ "$RC" -eq 0 ] && [ "$(verdict 'v["overall"]')" = OK ] && echo yes || echo no)" "exit 0, overall OK (rc=$RC)"
+check "$([ "$(verdict '[s["verdict"] for s in v["stages"] if s["stage"]=="jobfound"][0]')" = DISABLED ] && echo yes || echo no)" "jobfound verdict DISABLED"
+
+echo
+echo "13. Gmail auth expired -> still aborts right after the email collector"
+run_pipeline "0.10" "FAKE_STAGE_OUT_collector=HttpError 401 invalid_grant"
+check "$([ "$RC" -eq 2 ] && [ "$(stages)" = "collector" ] && echo yes || echo no)" "exit 2, only the collector ran (rc=$RC, ran: '$(stages)')"
+check "$([ "$(verdict 'v["overall"]')" = FAILED_GMAIL_AUTH ] && echo yes || echo no)" "verdict FAILED_GMAIL_AUTH"
+
+echo
+echo "14. A jobfound error mentioning 401 does not trip the Gmail-auth abort"
+run_pipeline "0.10" "FAKE_STAGE_OUT_collect_jobfound=HttpError 401 from somewhere"
+check "$([ "$RC" -eq 0 ] && [ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "exit 0, every stage ran (rc=$RC)"
 
 echo
 if [ "$fail" -eq 0 ]; then
