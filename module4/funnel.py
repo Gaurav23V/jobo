@@ -42,6 +42,10 @@ class FunnelResult:
     skipped_by_policy: int
     not_attempted: int
     apply_rate: float | None  # None when still_open == 0 (undefined, not 0%)
+    # Rows first seen in the window that the post-enrich rule filter dropped
+    # before triage (module3/prefilter.py), per reason. Outside the rate: they
+    # never had should_apply=1.
+    prefiltered: dict[str, int] = field(default_factory=dict)
 
     def render(self, title: str) -> str:
         lines = [title]
@@ -60,6 +64,10 @@ class FunnelResult:
             lines.append(
                 f"  APPLY RATE: {self.apply_rate:.1%}  ({self.submitted}/{self.still_open})"
             )
+        total = sum(self.prefiltered.values())
+        lines.append(f"  Prefiltered before triage (not in the rate): {total}")
+        for reason, n in sorted(self.prefiltered.items(), key=lambda kv: (-kv[1], kv[0])):
+            lines.append(f"    {reason}: {n}")
         return "\n".join(lines)
 
 
@@ -83,6 +91,15 @@ def compute_funnel(
     still_open = len(rows) - closed
     rate = (submitted / still_open) if still_open else None
 
+    pq = session.query(JobModel.prefilter_reason).filter(JobModel.prefilter_reason.isnot(None))
+    if since is not None:
+        pq = pq.filter(JobModel.first_seen_at >= since)
+    if until is not None:
+        pq = pq.filter(JobModel.first_seen_at < until)
+    prefiltered: dict[str, int] = {}
+    for (reason,) in pq:
+        prefiltered[reason] = prefiltered.get(reason, 0) + 1
+
     return FunnelResult(
         since=since,
         until=until,
@@ -94,6 +111,7 @@ def compute_funnel(
         skipped_by_policy=skipped_by_policy,
         not_attempted=not_attempted,
         apply_rate=rate,
+        prefiltered=prefiltered,
     )
 
 

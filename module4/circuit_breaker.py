@@ -18,7 +18,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +52,39 @@ TRIP_WINDOW_DAYS = 14  # ignore failures older than this when counting
 # The breaker only makes sense for the employer's own ATS host.
 LISTING_HOSTS = ("linkedin.com",)
 
+# Hosts one ATS shares across all its employers, with the employer in the
+# first path segment (job-boards.greenhouse.io/<employer>/jobs/1). jobfound
+# rows link to these directly, so the same lumping hazard as linkedin.com
+# applies: two unrelated Greenhouse employers must not trip every Greenhouse
+# job. On these hosts the breaker key is host/<employer>. Per-tenant hosts
+# (acme.wd5.myworkdayjobs.com, careers-acme.icims.com) are already distinct.
+SHARED_ATS_HOSTS = (
+    "boards.greenhouse.io",
+    "job-boards.greenhouse.io",
+    "job-boards.eu.greenhouse.io",
+    "jobs.ashbyhq.com",
+    "jobs.lever.co",
+    "jobs.eu.lever.co",
+    "ats.rippling.com",
+    "apply.workable.com",
+    "jobs.smartrecruiters.com",
+)
+
 
 def _domain(url: str) -> str:
     try:
-        host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+        parts = urlparse(url)
+        host = (parts.hostname or "").lower().removeprefix("www.")
     except Exception:
         return ""
     if any(host == h or host.endswith("." + h) for h in LISTING_HOSTS):
         return ""
+    if host in SHARED_ATS_HOSTS:
+        segment = next((p for p in parts.path.split("/") if p), "").lower()
+        if segment == "embed":  # boards.greenhouse.io/embed/job_app?for=<employer>
+            segment = (parse_qs(parts.query).get("for") or [""])[0].lower()
+        # No employer in the URL: no key, so the breaker never trips the whole host.
+        return f"{host}/{segment}" if segment else ""
     return host
 
 

@@ -27,10 +27,18 @@ def list_jobs_for_module3(
     Blocked employers are dropped here so we never even spend an LLM fit call
     or generate PDFs for a company we will never apply to. `force` does not
     override the blocklist by design.
+
+    Rows the post-enrich rule filter dropped (prefilter_reason set, see
+    module3/prefilter.py) are skipped in every mode except `force` together
+    with `job_id`: re-scoring one prefiltered row is an explicit override,
+    and its triage verdict then clears the prefilter drop (module3/persist.py).
+    A plain `--force` or `--queued` never re-scores them.
     """
     q = session.query(JobModel).filter(JobModel.module2_enriched_at.isnot(None))
     if job_id is not None:
         q = q.filter(JobModel.id == job_id)
+    if not (force and job_id is not None):
+        q = q.filter(JobModel.prefilter_reason.is_(None))
     if queued:
         # Only the live apply queue (same filter module4 uses): should_apply,
         # not applied, not a dead listing. The runner re-runs both phases for

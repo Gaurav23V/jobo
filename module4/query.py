@@ -36,6 +36,9 @@ def list_jobs_to_apply(
         # explicit filter that replaces that accident.
         .filter(JobModel.module4_closed_at.is_(None))
         .filter(JobModel.module2_enriched_at.isnot(None))
+        # Backstop: a prefiltered row already has should_apply=False, and
+        # only a triage verdict (which clears prefilter_reason) can set it.
+        .filter(JobModel.prefilter_reason.is_(None))
         .order_by(JobModel.module3_fit_score.desc(), JobModel.id)
     )
     if job_id is not None:

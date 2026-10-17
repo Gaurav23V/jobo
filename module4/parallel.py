@@ -38,7 +38,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from db.models import JobModel
-from module4 import apply_queue, browser_session, budget_guard, constants, query
+from module4 import apply_queue, browser_session, budget_guard, constants, query, routing
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +269,22 @@ def _close_browser(port: int) -> None:
         logger.debug("Could not close the browser on port %d: %s", port, e)
 
 
+def preroute(queue: apply_queue.ApplyQueue, jobs: list[JobModel]) -> int:
+    """Queue direct employer links for their worker before any routing.
+
+    A job_url that is already the employer's page (a direct ATS link from
+    jobfound, module4/routing.py) needs no LinkedIn routing, so the LinkedIn
+    worker's browser never opens it. Returns how many were pre-routed.
+    """
+    n = 0
+    for j in jobs:
+        route, apply_url, note = routing.initial_route(j.job_url)
+        if route:
+            queue.set_route(j.id, route, apply_url, note)
+            n += 1
+    return n
+
+
 def run_parallel(
     session: Session,
     *,
@@ -321,6 +337,8 @@ def run_parallel(
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
     queue = apply_queue.ApplyQueue(run_id)
     queue.create_run([] if canary_only else [(j.id, j.company_name) for j in jobs])
+    if not canary_only:
+        preroute(queue, jobs)
     session.rollback()  # the workers own jobs.db from here; hold no read snapshot
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)

@@ -19,6 +19,7 @@ from module3.runner import run_module3
 from module4 import budget_guard
 from module4.funnel import compute_funnel, run_window_from_log
 from module4.runner import health_verdict, run_module4
+from sources import jobfound
 
 
 @click.group()
@@ -61,6 +62,71 @@ def collector(hours: int, quiet: bool, dry_run: bool):
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise click.Abort()
+
+
+@cli.command("collect-jobfound")
+@click.option("--dry-run", is_flag=True, help="Fetch and filter; write nothing (not even the cursor)")
+@click.option("--quiet", is_flag=True, help="Suppress verbose output")
+@click.option(
+    "--since-hours",
+    default=jobfound.DEFAULT_SINCE_HOURS,
+    show_default=True,
+    help="With no stored cursor, how far back the sitemap gap fill looks",
+)
+@click.option("--no-gap-fill", is_flag=True, help="Feed only: skip the sitemap gap fill (cursor unchanged)")
+@click.option(
+    "--force-gap-fill",
+    is_flag=True,
+    hidden=True,
+    help="Fetch every sitemap job page in the window, even ones the feed has (end-to-end checks)",
+)
+def collect_jobfound(dry_run: bool, quiet: bool, since_hours: int, no_gap_fill: bool, force_gap_fill: bool):
+    """Collect jobs from jobfound.org (Atom feed + sitemap gap fill), pre-enriched"""
+
+    if quiet:
+        logging.basicConfig(level=logging.WARNING)
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
+    if not dry_run:
+        init_db()
+    session = get_session()
+    result = jobfound.collect(
+        session,
+        dry_run=dry_run,
+        since_hours=since_hours,
+        gap_fill=not no_gap_fill,
+        force_gap_fill=force_gap_fill,
+    )
+
+    ins = result.insert
+    click.echo(f"\nSummary{' (dry run, nothing written)' if dry_run else ''}:")
+    click.echo(f"  Feed entries: {result.feed_entries}" + (f" (FAILED: {result.feed_error})" if result.feed_error else ""))
+    if result.parse_skipped:
+        click.echo(f"  Parse skipped: {result.parse_skipped}")
+    if not no_gap_fill:
+        click.echo(
+            f"  Sitemap gap URLs: {result.gap_urls}"
+            + (f" (FAILED: {result.sitemap_error})" if result.sitemap_error else "")
+            + (f", {result.gap_truncated} left for next run" if result.gap_truncated else "")
+        )
+    click.echo(f"  Pages fetched: {result.pages_fetched} (errors: {result.page_errors})")
+    click.echo(f"  Thin-description fallbacks: {result.thin_fallbacks} (failed: {result.thin_fallback_errors})")
+    click.echo(f"  Kept: {result.kept} (page-URL fallbacks: {result.page_url_fallbacks})")
+    click.echo(f"  Dropped: {sum(result.dropped_by_reason.values())}")
+    for reason, n in sorted(result.dropped_by_reason.items(), key=lambda kv: -kv[1]):
+        click.echo(f"    {reason}: {n}")
+    click.echo(f"  {'Would insert' if dry_run else 'Inserted'}: {ins.inserted}")
+    click.echo(f"  Duplicates: {ins.duplicates} {ins.duplicates_by or ''}".rstrip())
+    if ins.errors:
+        click.echo(f"  Insert errors: {len(ins.errors)} ({ins.errors[0]})")
+    if result.cursor_after:
+        click.echo(f"  Cursor: {result.cursor_before} -> {result.cursor_after}")
+    if result.failed:
+        sys.exit(1)
 
 
 @cli.command("enrich")
@@ -107,6 +173,27 @@ def enrich(quiet: bool, dry_run: bool, force: bool, job_id: int | None = None):
             if len(result.errors) > 20:
                 click.echo(f"    ... and {len(result.errors) - 20} more")
 
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise click.Abort()
+
+
+@cli.command("prefilter")
+@click.option("--dry-run", is_flag=True, help="Count what would be dropped; write nothing")
+@click.option("--quiet", is_flag=True, help="Suppress per-row log lines")
+def prefilter(dry_run: bool, quiet: bool):
+    """Rule filter between enrich and triage (policy/job_filters.py): drop rows before a triage call."""
+    from module3.prefilter import run_prefilter
+
+    logging.basicConfig(
+        level=logging.WARNING if quiet else logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    try:
+        init_db()
+        session = get_session()
+        result = run_prefilter(session, dry_run=dry_run)
+        click.echo("\n" + result.render(dry_run=dry_run))
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise click.Abort()
@@ -239,11 +326,33 @@ def run_all(ctx: click.Context):
     help="Run each worker's attach canary (GHO-17) and stop: no job is claimed and "
     "nothing is applied. --dry-run is NOT that: it still runs real apply agents.",
 )
+@click.option(
+    "--plan",
+    is_flag=True,
+    help="Print how each queued job would be routed (ATS kind, blocklist, paused site, "
+    "preflight, which worker) and exit. No browser, agent, network or DB write. Takes "
+    "--job-id, --limit and --force.",
+)
 def apply(
     quiet: bool, dry_run: bool, limit: int | None, force: bool, job_id: int | None,
-    form_workers: int, job_ids: str, canary_only: bool,
+    form_workers: int, job_ids: str, canary_only: bool, plan: bool,
 ):
     """Module 4: submit applications for should_apply jobs (Hermes browser agent)."""
+    if plan:
+        from module4 import plan as plan_mod
+
+        logging.basicConfig(level=logging.WARNING)
+        # No init_db(): it may ALTER jobs.db, and the plan writes nothing.
+        missing = plan_mod.missing_columns()
+        if missing:
+            raise click.ClickException(
+                f"jobs.db lacks column(s) {', '.join(missing)}; run `jobo prefilter --dry-run` "
+                "on it once (adds them) and retry"
+            )
+        session = get_session()
+        click.echo(plan_mod.render(plan_mod.build_plan(session, job_id=job_id, limit=limit, force=force)))
+        return
+
     from policy import personal
     personal.require_real("apply")
     ids = [int(x) for x in job_ids.replace(" ", "").split(",") if x]

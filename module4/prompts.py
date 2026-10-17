@@ -666,14 +666,19 @@ LinkedIn for every later job."""
     form_note = ""
     if listing_url:
         # A parallel run's form worker (module4/parallel.py): the LinkedIn
-        # worker already opened the listing and clicked Apply, and this
-        # browser has never been signed in to LinkedIn.
+        # worker already opened the listing and clicked Apply, or the job
+        # source linked the employer's page directly (listing_url == url).
+        # Either way this browser has never been signed in to LinkedIn.
+        origin = (
+            "a direct link from the job source (there is no LinkedIn listing)"
+            if listing_url == url
+            else f"already opened from the LinkedIn listing ({listing_url})"
+        )
         form_note = f"""
 
-FORM WORKER: the url above is the employer's own application page, already
-opened from the LinkedIn listing ({listing_url}). Start there. This browser is
-NOT signed in to LinkedIn or Google and must stay that way: never open
-linkedin.com. If the employer's site will only continue through LinkedIn
+FORM WORKER: the url above is the employer's own application page, {origin}.
+Start there. This browser is NOT signed in to LinkedIn or Google and must stay
+that way: never open linkedin.com. If the employer's site will only continue through LinkedIn
 (e.g. "Apply with LinkedIn" is the only way in), stop and report
     STATUS: linkedin_signed_out
     DETAIL: employer site requires LinkedIn - hand back to the LinkedIn worker

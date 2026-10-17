@@ -32,6 +32,10 @@ def apply_phase1_fit(
     # pushing a closed posting back into the apply queue.
     listing_is_dead = job.module4_closed_at is not None
     job.should_apply = should_apply and not already_dropped_by_apply and not listing_is_dead
+    # A prefiltered row only reaches triage through `triage --force --job-id`
+    # (module3/query.py): the owner asked for a real verdict, so the score
+    # decides from here and the prefilter drop no longer applies.
+    job.prefilter_reason = None
     if dry_run:
         return
     session.add(job)

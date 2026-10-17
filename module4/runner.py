@@ -39,6 +39,7 @@ from module4 import (
     preflight,
     prompts,
     query,
+    routing,
     submission_audit,
     upload_names,
 )
@@ -860,7 +861,10 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
         # ("LinkedIn requires sign-in") - on 2026-10-03 that drained the last
         # attempt of 1140, 1173 and 1220 in a row. One read-only CDP call
         # (cookie NAMES only, see module4/linkedin_session.py) answers it.
-        if linkedin_session.enabled():
+        # A direct employer link (jobfound, module4/routing.py) never opens
+        # LinkedIn, so a signed-out browser is no reason to stop on it; the
+        # next LinkedIn listing still gets the check.
+        if linkedin_session.enabled() and routing.is_linkedin_listing(job.job_url):
             session_state = linkedin_session.check_session(cdp)
             if session_state.signed_out:
                 result.attempted -= 1
