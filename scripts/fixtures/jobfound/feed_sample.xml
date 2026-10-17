@@ -1,0 +1,480 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test fixture: structure of https://jobfound.org/feeds/jobs (2026-10-17),
+     fictional employers/ids/URLs. Entry f00d...12 keeps the real feed's
+     unescaped '&' in its apply URL, so this file is NOT well-formed XML. -->
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:job="http://jobfound.org/ns/job">
+  <id>urn:jobfound:feed:jobs</id>
+  <title>Jobfound - Latest Job Opportunities</title>
+  <link href="https://jobfound.org" rel="alternate" type="text/html"/>
+  <link href="https://jobfound.org/feeds/jobs" rel="self" type="application/atom+xml"/>
+  <updated>2026-10-17T21:35:13.926Z</updated>
+  <author>
+    <name>Jobfound</name>
+    <uri>https://jobfound.org</uri>
+  </author>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000001</id>
+    <title type="text">Data Engineer</title>
+    <link href="https://jobfound.org/job/acme-analytics-is-hiring-for-data-engineer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/data-engineer-at-acme-analytics-4000000001?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T18:07:00.000Z</updated>
+    <published>2026-10-17T18:07:00.000Z</published>
+    <author>
+      <name>Acme Analytics</name>
+    </author>
+    <summary type="text">Acme Analytics is hiring a Data Engineer.</summary>
+    <content type="html">&lt;p&gt;Acme Analytics is hiring a &lt;strong&gt;Data Engineer&lt;/strong&gt; to join a small product team.&lt;/p&gt;
+&lt;h3&gt;Responsibilities&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;Design, build and ship features end to end.&lt;/li&gt;&lt;li&gt;Write clear documentation and review code from teammates.&lt;/li&gt;&lt;li&gt;Work with product and design on scope and trade-offs.&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;Requirements&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;Solid fundamentals in data structures and systems.&lt;/li&gt;&lt;li&gt;Comfortable with Python, SQL and Git.&lt;/li&gt;&lt;li&gt;Good written communication.&lt;/li&gt;&lt;/ul&gt;
+&lt;h3&gt;Benefits&lt;/h3&gt;
+&lt;ul&gt;&lt;li&gt;Flexible hours&lt;/li&gt;&lt;li&gt;Learning budget&lt;/li&gt;&lt;/ul&gt;</content>
+    <category term="Data &amp; AI" label="Data &amp; AI"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-16 LPA"/>
+    <category term="experience:2-4" label="Experience: 2-4+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000002</id>
+    <title type="text">Software Engineer</title>
+    <link href="https://jobfound.org/job/globex-labs-is-hiring-for-software-engineer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://www.linkedin.com/jobs/view/4000000002/" rel="related" title="Apply"/>
+    <updated>2026-10-17T17:14:00.000Z</updated>
+    <published>2026-10-17T17:14:00.000Z</published>
+    <author>
+      <name>Globex Labs</name>
+    </author>
+    <summary type="text">Globex Labs is hiring a Software Engineer.</summary>
+    <content type="html"><![CDATA[<p>Globex Labs is hiring a <strong>Software Engineer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Engineering and Development" label="Engineering and Development"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 10-12 LPA"/>
+    <category term="experience:1-3" label="Experience: 1-3+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000003</id>
+    <title type="text">Backend Developer</title>
+    <link href="https://jobfound.org/job/initech-systems-is-hiring-for-backend-developer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://www.linkedin.com/comm/jobs/view/4000000003?trackingId=AbCdEf123%3D%3D&amp;source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T17:21:00.000Z</updated>
+    <published>2026-10-17T17:21:00.000Z</published>
+    <author>
+      <name>Initech Systems</name>
+    </author>
+    <summary type="text">Initech Systems is hiring a Backend Developer.</summary>
+    <content type="html"><![CDATA[<p>Initech Systems is hiring a <strong>Backend Developer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Engineering and Development" label="Engineering and Development"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 8-11 LPA"/>
+    <category term="experience:2" label="Experience: 2+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000004</id>
+    <title type="text">Senior Platform Engineer</title>
+    <link href="https://jobfound.org/job/umbrella-cloud-is-hiring-for-senior-platform-engineer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://job-boards.greenhouse.io/umbrellacloud/jobs/7000004?gh_jid=7000004&amp;source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T16:28:00.000Z</updated>
+    <published>2026-10-17T16:28:00.000Z</published>
+    <author>
+      <name>Umbrella Cloud</name>
+    </author>
+    <summary type="text">Umbrella Cloud is hiring a Senior Platform Engineer.</summary>
+    <content type="html"><![CDATA[<p>Umbrella Cloud is hiring a <strong>Senior Platform Engineer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="DevOps" label="DevOps"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 15-20 LPA"/>
+    <category term="experience:5" label="Experience: 5++ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000005</id>
+    <title type="text">Customer Service Representative</title>
+    <link href="https://jobfound.org/job/hooli-support-is-hiring-for-customer-service-representative-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://careers.hooli-support.example/jobs/csr-1005?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T16:35:00.000Z</updated>
+    <published>2026-10-17T16:35:00.000Z</published>
+    <author>
+      <name>Hooli Support</name>
+    </author>
+    <summary type="text">Hooli Support is hiring a Customer Service Representative.</summary>
+    <content type="html"><![CDATA[<p>Hooli Support is hiring a <strong>Customer Service Representative</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="experience:entry" label="Entry Level"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:USA" label="Location: USA"/>
+    <category term="salary" label="Salary: Competitive"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000006</id>
+    <title type="text">Python Developer</title>
+    <link href="https://jobfound.org/job/vandelay-tech-is-hiring-for-python-developer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/python-developer-at-vandelay-tech-4000000006?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T15:42:00.000Z</updated>
+    <published>2026-10-17T15:42:00.000Z</published>
+    <author>
+      <name>Vandelay Tech</name>
+    </author>
+    <summary type="text">Vandelay Tech is hiring a Python Developer.</summary>
+    <content type="html"><![CDATA[<p>Vandelay Tech is hiring a <strong>Python Developer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="experience:entry" label="Entry Level"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-15 LPA"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000007</id>
+    <title type="text">Software Engineer Trainee</title>
+    <link href="https://jobfound.org/job/stark-digital-is-hiring-for-software-engineer-trainee-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/software-engineer-trainee-at-stark-digital-4000000007?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T15:49:00.000Z</updated>
+    <published>2026-10-17T15:49:00.000Z</published>
+    <author>
+      <name>Stark Digital</name>
+    </author>
+    <summary type="text">Stark Digital is hiring a Software Engineer Trainee.</summary>
+    <content type="html"><![CDATA[<p>Stark Digital is hiring a <strong>Software Engineer Trainee</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Engineering and Development" label="Engineering and Development"/>
+    <category term="Internship" label="Job Type: Internship"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 0-1 LPA"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000008</id>
+    <title type="text">Data Analyst</title>
+    <link href="https://jobfound.org/job/wayne-data-is-hiring-for-data-analyst-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/data-analyst-at-wayne-data-4000000008?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T14:56:00.000Z</updated>
+    <published>2026-10-17T14:56:00.000Z</published>
+    <author>
+      <name>Wayne Data</name>
+    </author>
+    <summary type="text">Wayne Data is hiring a Data Analyst.</summary>
+    <content type="html"><![CDATA[<p>Wayne Data is hiring a <strong>Data Analyst</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Internship" label="Internship"/>
+    <category term="Data &amp; AI" label="Data &amp; AI"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-16 LPA"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000009</id>
+    <title type="text">Graduate Intern - Machine Learning</title>
+    <link href="https://jobfound.org/job/cyberdyne-ai-is-hiring-for-graduate-intern-machine-learning-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/graduate-intern-machine-learning-at-cyberdyne-ai-4000000009?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T14:03:00.000Z</updated>
+    <published>2026-10-17T14:03:00.000Z</published>
+    <author>
+      <name>Cyberdyne AI</name>
+    </author>
+    <summary type="text">Cyberdyne AI is hiring a Graduate Intern - Machine Learning.</summary>
+    <content type="html"><![CDATA[<p>Cyberdyne AI is hiring a <strong>Graduate Intern - Machine Learning</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Data &amp; AI" label="Data &amp; AI"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 15-25 LPA"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d000000000000000a</id>
+    <title type="text">QA Automation Engineer</title>
+    <link href="https://jobfound.org/job/soylent-software-is-hiring-for-qa-automation-engineer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/qa-automation-engineer-at-soylent-software-4000000010?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T13:10:00.000Z</updated>
+    <published>2026-10-17T13:10:00.000Z</published>
+    <author>
+      <name>Soylent Software</name>
+    </author>
+    <summary type="text">Soylent Software is hiring a QA Automation Engineer.</summary>
+    <content type="html"><![CDATA[<p>Soylent Software is hiring a <strong>QA Automation Engineer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Quality Assurance" label="Quality Assurance"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-15 LPA"/>
+    <category term="experience:2-4" label="Experience: 2-4+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d000000000000000b</id>
+    <title type="text">SDET</title>
+    <link href="https://jobfound.org/job/massive-dynamic-is-hiring-for-sdet-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/sdet-at-massive-dynamic-4000000011?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T13:17:00.000Z</updated>
+    <published>2026-10-17T13:17:00.000Z</published>
+    <author>
+      <name>Massive Dynamic</name>
+    </author>
+    <summary type="text">Massive Dynamic is hiring a SDET.</summary>
+    <content type="html"><![CDATA[<p>Massive Dynamic is hiring a <strong>SDET</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Engineering and Development" label="Engineering and Development"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-16 LPA"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d000000000000000c</id>
+    <title type="text">Manual Testing Engineer</title>
+    <link href="https://jobfound.org/job/gringotts-fintech-is-hiring-for-manual-testing-engineer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/manual-testing-engineer-at-gringotts-fintech-4000000012?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T12:24:00.000Z</updated>
+    <published>2026-10-17T12:24:00.000Z</published>
+    <author>
+      <name>Gringotts Fintech</name>
+    </author>
+    <summary type="text">Gringotts Fintech is hiring a Manual Testing Engineer.</summary>
+    <content type="html"><![CDATA[<p>Gringotts Fintech is hiring a <strong>Manual Testing Engineer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Engineering and Development" label="Engineering and Development"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-16 LPA"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d000000000000000d</id>
+    <title type="text">Backend Engineer, Testing Infrastructure</title>
+    <link href="https://jobfound.org/job/tyrell-systems-is-hiring-for-backend-engineer-testing-infrastructure-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://tyrell.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Backend-Engineer--Testing-Infrastructure_R-10013?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T12:31:00.000Z</updated>
+    <published>2026-10-17T12:31:00.000Z</published>
+    <author>
+      <name>Tyrell Systems</name>
+    </author>
+    <summary type="text">Tyrell Systems is hiring a Backend Engineer, Testing Infrastructure.</summary>
+    <content type="html"><![CDATA[<p>Tyrell Systems is hiring a <strong>Backend Engineer, Testing Infrastructure</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Engineering and Development" label="Engineering and Development"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:USA" label="Location: USA"/>
+    <category term="salary" label="Salary: $120K-$240K"/>
+    <category term="experience:2" label="Experience: 2+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d000000000000000e</id>
+    <title type="text">Sales Executive</title>
+    <link href="https://jobfound.org/job/pied-piper-is-hiring-for-sales-executive-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/sales-executive-at-pied-piper-4000000014?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T11:38:00.000Z</updated>
+    <published>2026-10-17T11:38:00.000Z</published>
+    <author>
+      <name>Pied Piper</name>
+    </author>
+    <summary type="text">Pied Piper is hiring a Sales Executive.</summary>
+    <content type="html"><![CDATA[<p>Pied Piper is hiring a <strong>Sales Executive</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Sales" label="Sales"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 3-5 LPA"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d000000000000000f</id>
+    <title type="text">Machine Learning Engineer</title>
+    <link href="https://jobfound.org/job/aperture-research-is-hiring-for-machine-learning-engineer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://careers.aperture-research.example/jobs/ml-engineer-1015?utm_source=jobfound&amp;source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T11:45:00.000Z</updated>
+    <published>2026-10-17T11:45:00.000Z</published>
+    <author>
+      <name>Aperture Research</name>
+    </author>
+    <summary type="text">Aperture Research is hiring a Machine Learning Engineer.</summary>
+    <content type="html"><![CDATA[<p>Aperture Research is hiring a <strong>Machine Learning Engineer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Data &amp; AI" label="Data &amp; AI"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:UK" label="Location: UK"/>
+    <category term="salary" label="Salary: £35K-£50K"/>
+    <category term="experience:1-3" label="Experience: 1-3+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000010</id>
+    <title type="text">Frontend Developer</title>
+    <link href="https://jobfound.org/job/oscorp-web-is-hiring-for-frontend-developer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="http://linkedin.com/jobs/view/4000000016" rel="related" title="Apply"/>
+    <updated>2026-10-17T10:52:00.000Z</updated>
+    <published>2026-10-17T10:52:00.000Z</published>
+    <author>
+      <name>Oscorp Web</name>
+    </author>
+    <summary type="text">Oscorp Web is hiring a Frontend Developer.</summary>
+    <content type="html"><![CDATA[<p>Oscorp Web is hiring a Frontend Developer. Apply via the link.</p>]]></content>
+    <category term="Engineering and Development" label="Engineering and Development"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: Competitive"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000011</id>
+    <title type="text">DevOps Engineer</title>
+    <link href="https://jobfound.org/job/nakatomi-infra-is-hiring-for-devops-engineer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://www.linkedin.com/jobs/view/devops-engineer-at-nakatomi-infra-4000000017/?refId=Xy12%3D&amp;source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T10:59:00.000Z</updated>
+    <published>2026-10-17T10:59:00.000Z</published>
+    <author>
+      <name>Nakatomi Infra</name>
+    </author>
+    <summary type="text">Nakatomi Infra is hiring a DevOps Engineer.</summary>
+    <content type="html"><![CDATA[<p>Nakatomi Infra is hiring a <strong>DevOps Engineer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="DevOps" label="DevOps"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-16 LPA"/>
+    <category term="experience:2-4" label="Experience: 2-4+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000012</id>
+    <title type="text">Intern, Community Outreach</title>
+    <link href="https://jobfound.org/job/contoso-health-is-hiring-for-intern-community-outreach-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://careers-contoso.icims.com/jobs/10018/intern%2c-community-outreach/job?in_iframe=1&source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T09:06:00.000Z</updated>
+    <published>2026-10-17T09:06:00.000Z</published>
+    <author>
+      <name>Contoso Health</name>
+    </author>
+    <summary type="text">Contoso Health is hiring a Intern, Community Outreach.</summary>
+    <content type="html"><![CDATA[<p>Contoso Health is hiring a <strong>Intern, Community Outreach</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Creatives and Design" label="Creatives and Design"/>
+    <category term="Internship" label="Job Type: Internship"/>
+    <category term="location:USA" label="Location: USA"/>
+    <category term="salary" label="Salary: $26.58/hr - $34.38/hr"/>
+    <category term="experience:entry" label="Entry Level"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000013</id>
+    <title type="text">Data Scientist</title>
+    <link href="https://jobfound.org/job/initrode-insights-is-hiring-for-data-scientist-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://in.linkedin.com/jobs/view/data-scientist-at-initrode-insights-4000000019?source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T09:13:00.000Z</updated>
+    <published>2026-10-17T09:13:00.000Z</published>
+    <author>
+      <name>Initrode Insights</name>
+    </author>
+    <summary type="text">Initrode Insights is hiring a Data Scientist.</summary>
+    <content type="html"><![CDATA[<p>Initrode Insights is hiring a <strong>Data Scientist</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Data &amp; AI" label="Data &amp; AI"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 4-6 LPA"/>
+    <category term="experience:1-3" label="Experience: 1-3+ years"/>
+  </entry>
+  <entry>
+    <id>urn:jobfound:job:f00d0000000000000014</id>
+    <title type="text">Full Stack Developer</title>
+    <link href="https://jobfound.org/job/monsters-software-is-hiring-for-full-stack-developer-india-17-october-2026" rel="alternate" type="text/html"/>
+    <link href="https://job-boards.greenhouse.io/embed/job_app?for=monsterssoftware&amp;token=7000020&amp;gh_src=jobfound.org&amp;source=jobfound.org" rel="related" title="Apply"/>
+    <updated>2026-10-17T08:20:00.000Z</updated>
+    <published>2026-10-17T08:20:00.000Z</published>
+    <author>
+      <name>Monsters Software</name>
+    </author>
+    <summary type="text">Monsters Software is hiring a Full Stack Developer.</summary>
+    <content type="html"><![CDATA[<p>Monsters Software is hiring a <strong>Full Stack Developer</strong> to join a small product team.</p>
+<h3>Responsibilities</h3>
+<ul><li>Design, build and ship features end to end.</li><li>Write clear documentation and review code from teammates.</li><li>Work with product and design on scope and trade-offs.</li></ul>
+<h3>Requirements</h3>
+<ul><li>Solid fundamentals in data structures and systems.</li><li>Comfortable with Python, SQL and Git.</li><li>Good written communication.</li></ul>
+<h3>Benefits</h3>
+<ul><li>Flexible hours</li><li>Learning budget</li></ul>]]></content>
+    <category term="Software Engineer" label="Software Engineer"/>
+    <category term="Full-time" label="Job Type: Full-time"/>
+    <category term="location:India" label="Location: India"/>
+    <category term="salary" label="Salary: 12-16 LPA"/>
+  </entry>
+</feed>
