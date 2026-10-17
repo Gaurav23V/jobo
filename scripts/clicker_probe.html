@@ -1,0 +1,149 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Isolated NEED_CLICK regression fixture</title>
+<style>
+body { margin: 30px; font: 16px sans-serif; }
+button, label, [role=checkbox], [role=radio], [role=button] {
+  margin: 12px; padding: 12px; display: block; width: fit-content;
+}
+input[type=checkbox], input[type=radio] { width: 20px; height: 20px; }
+</style>
+<form id="form"></form><div id="feedback"></div>
+<script>
+const scenario = new URLSearchParams(location.search).get('case');
+window.counts = {clicks: 0, trusted: 0, changes: 0, submits: 0, other: 0};
+const form = document.querySelector('#form');
+const submit = '<button id="submit" type="submit">Submit application</button>';
+const fixtures = {
+  native: '<input id="choice" type="checkbox"><label for="choice">Required consent</label>',
+  wrapped: '<label>Required consent <input id="choice" type="checkbox"></label>',
+  hidden: '<input id="choice" type="checkbox" style="display:none"><label for="choice"><span>Required consent</span></label>',
+  hidden_wrapped: '<label><input id="choice" type="checkbox" style="display:none"><span>Required consent</span></label>',
+  native_radio: '<input id="other" type="radio" name="answer" checked><label for="other">No</label><input id="choice" type="radio" name="answer"><label for="choice">Required consent</label>',
+  native_labelledby: '<span id="name-a">Required</span> <span id="name-b">consent</span><input id="choice" type="checkbox" aria-labelledby="name-a name-b">',
+  aria: '<div id="choice" role="checkbox" aria-checked="false" tabindex="0" aria-label="Required consent"></div>',
+  aria_radio: '<div id="choice" role="radio" aria-checked="false" tabindex="0">Required consent</div>',
+  aria_labelledby: '<span id="name-a">Required</span> <span id="name-b">consent</span><div id="choice" role="checkbox" aria-checked="false" aria-labelledby="name-a name-b" tabindex="0">Tick</div>',
+  aria_button: '<span id="name-a">Submit application</span><div id="submit" role="button" aria-labelledby="name-a" tabindex="0">Send</div>',
+  wrapped_role_native: '<div id="role-wrapper" role="checkbox" aria-label="Required consent"><input id="choice" type="checkbox" style="display:none"></div>',
+  hidden_unreachable: '<input id="choice" type="checkbox" aria-label="Required consent" style="display:none">',
+  aria_for: '<label for="choice">Required consent</label><div id="choice" role="checkbox" aria-checked="false" tabindex="0">Tick</div>',
+  aria_wrapped: '<label>Required consent <div id="choice" role="checkbox" aria-checked="false" tabindex="0"></div></label>',
+  disabled: '<input id="choice" type="checkbox" disabled><label for="choice">Required consent</label>',
+  disabled_fieldset: '<fieldset disabled><input id="choice" type="checkbox"><label for="choice">Required consent</label></fieldset>',
+  disabled_aria: '<div id="choice" role="checkbox" aria-checked="false" aria-disabled="true">Required consent</div>',
+  disabled_ancestor: '<div aria-disabled="true"><label><input id="choice" type="checkbox">Required consent</label></div>',
+  missing: '',
+  ambiguous: '<label>Required consent <input id="choice" type="checkbox"></label><label>Required consent <input id="other" type="checkbox"></label>',
+  ambiguous_partial: '<button type="button">Accept terms</button><button type="button">Accept privacy</button>',
+  ambiguous_submit: submit + '<button type="submit">Send application</button>',
+  default_submit: submit,
+  default_next: '<button type="button">Next</button>',
+  async_submit: submit,
+  late_submit: submit,
+  busy_submit: submit,
+  removed_submit: submit,
+  silent_submit: submit,
+  prior_success: '<p>Thank you for applying</p>' + submit,
+  prior_error: '<p>This field is required</p>' + submit,
+  new_error: submit,
+  native_validation: '<label>Name <input id="name" required></label>' + submit,
+  success: submit,
+  navigation: submit,
+  disabled_submit: '<label>Name <input id="name" required></label><button id="submit" disabled type="submit">Submit application</button>',
+  overlay: submit + '<div id="overlay" role="dialog" style="position:fixed;inset:0;background:white;z-index:999">Important dialog</div>',
+  hover_overlay: submit + '<div id="overlay" role="dialog" style="display:none;position:fixed;inset:0;background:white;z-index:999">Important dialog</div>',
+  partial_overlay: '<div style="position:relative;width:300px"><button id="submit" type="submit" style="width:300px;margin:0">Submit application</button><div id="overlay" style="position:absolute;top:0;bottom:0;left:90px;width:120px;z-index:999"></div></div>',
+  offscreen: '<div style="height:1600px"></div><label><input id="choice" type="checkbox">Required consent</label>',
+  nested_shadow: '<div id="host"></div>',
+  label_link: '<input id="choice" type="checkbox" style="display:none"><label for="choice"><a id="terms" href="#terms">Required consent</a></label>',
+};
+fixtures.checked = fixtures.native.replace('type="checkbox"', 'type="checkbox" checked');
+fixtures.checked_radio = fixtures.native_radio.replace('name="answer" checked', 'name="answer"').replace('id="choice" type="radio"', 'id="choice" type="radio" checked');
+fixtures.checked_aria = fixtures.aria.replace('aria-checked="false"', 'aria-checked="true"');
+fixtures.revert = fixtures.native;
+fixtures.remount_checked = fixtures.native;
+fixtures.checked_revert = fixtures.checked;
+fixtures.wrong_form_remount = fixtures.native;
+fixtures.cancel_click = fixtures.native;
+fixtures.native_button_role = '<input id="choice" type="checkbox" role="button" value="" aria-label="Required consent">';
+fixtures.default_disabled_alternative = fixtures.default_submit + '<button disabled type="submit">Finish</button>';
+form.innerHTML = fixtures[scenario] ?? (() => { throw Error('Unknown scenario: ' + scenario); })();
+if (!form.querySelector('#submit') && !['default_next', 'ambiguous_submit'].includes(scenario)) form.insertAdjacentHTML('beforeend', submit);
+const roots = [document];
+if (scenario === 'nested_shadow') {
+  const outer = document.querySelector('#host').attachShadow({mode:'open'});
+  outer.innerHTML = '<div id="inner"></div>';
+  const inner = outer.querySelector('#inner').attachShadow({mode:'open'});
+  inner.innerHTML = '<style>label { display:block;padding:20px;width:180px; }</style><input id="choice" type="checkbox" style="display:none"><label for="choice">Required consent</label>';
+  roots.push(outer, inner);
+}
+window.choice = () => roots.map(r => r.querySelector('#choice')).find(Boolean);
+if (scenario === 'wrapped_role_native') document.querySelector('#role-wrapper').addEventListener('click', e => {
+  if (e.target === choice()) return;
+  choice().checked = !choice().checked; // The fixture's own widget state, never the helper.
+  counts.clicks++;
+  counts.trusted += Number(e.isTrusted);
+  counts.changes++;
+});
+if (scenario === 'hover_overlay') document.querySelector('#submit').addEventListener('mouseenter', () => {
+  document.querySelector('#overlay').style.display = 'block';
+});
+window.readState = () => {
+  const c = choice();
+  return {...counts, checked: c ? (c.matches('input') ? c.checked : c.getAttribute('aria-checked') === 'true') : null,
+    otherChecked: document.querySelector('#other')?.checked ?? null,
+    feedback: document.querySelector('#feedback').innerText,
+    overlayPointerEvents: document.querySelector('#overlay')?.style.pointerEvents ?? null,
+    hash: location.hash};
+};
+for (const root of roots) {
+  root.addEventListener('click', e => {
+    const el = e.target;
+    if (el.matches('#choice, #submit, #other, button')) {
+      counts.clicks++;
+      if (e.isTrusted) counts.trusted++;
+    }
+    if (el.id === 'other') counts.other++;
+    if (el.matches('[role=checkbox], [role=radio]') && !el.querySelector('input') && el.getAttribute('aria-disabled') !== 'true') {
+      el.setAttribute('aria-checked', String(el.getAttribute('aria-checked') !== 'true'));
+      counts.changes++;
+    }
+    if (scenario === 'aria_button' && el.id === 'submit') document.querySelector('#feedback').textContent = 'Application submitted';
+  }, true);
+  root.addEventListener('change', e => {
+    if (e.target.id !== 'choice') return;
+    counts.changes++;
+    if (['revert', 'remount_checked'].includes(scenario)) setTimeout(() => {
+      const old = choice();
+      const fresh = old.cloneNode(true);
+      fresh.checked = scenario === 'remount_checked';
+      old.replaceWith(fresh);
+    }, 350);
+    if (scenario === 'wrong_form_remount') setTimeout(() => {
+      choice().remove();
+      const unrelated = document.createElement('form');
+      unrelated.innerHTML = '<input id="choice" type="checkbox" checked><label for="choice">Required consent</label>';
+      document.body.append(unrelated);
+    }, 350);
+  });
+}
+// A page that vetoes every click on the box, trusted or not (GHO-23 diagnosis).
+if (scenario === 'cancel_click') document.addEventListener('click', e => {
+  if (e.target === choice()) e.preventDefault();
+});
+if (scenario === 'checked_revert') setTimeout(() => { choice().checked = false; }, 350);
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  counts.submits++;
+  if (['async_submit', 'late_submit'].includes(scenario)) {
+    const r = await fetch('/submit' + location.search, {method:'POST'});
+    const data = await r.json();
+    document.querySelector('#feedback').textContent = data.message;
+  } else if (scenario === 'new_error') document.querySelector('#feedback').textContent = 'Please complete the required field';
+  else if (scenario === 'busy_submit') document.querySelector('#submit').disabled = true;
+  else if (scenario === 'removed_submit') document.querySelector('#submit').remove();
+  else if (scenario === 'success') document.querySelector('#feedback').textContent = 'Application submitted';
+  else if (scenario === 'navigation') location.href = '/done';
+});
+</script>

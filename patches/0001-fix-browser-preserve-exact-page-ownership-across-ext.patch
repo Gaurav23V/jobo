@@ -1,0 +1,1018 @@
+From ff3dfa6964e6302c9d88a45acafe25b3eeb8260e Mon Sep 17 00:00:00 2001
+From: Gaurav23V <137498654+Gaurav23V@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 20:56:17 +0530
+Subject: [PATCH] fix(browser): preserve exact page ownership across external
+ CDP resumes
+
+Route console through the active command backend, omit unverified supervisor frame metadata, and keep actionable controls visible without breaking snapshot structure. Checkpoint exact native page identity per conversation and browser instance across fresh daemons; failed capture, closed targets and timeout recycling fail closed.
+
+Verified with 711 browser tests (two independently proven baseline failures excluded), a real multi-process Chromium/backend harness, and a complete Jobo agent/server submission test. Independent review passed after targeted regressions. Local integration patch; not published upstream.
+---
+ tests/tools/browser_page_binding_live.py      | 210 ++++++++++++++++++
+ .../test_browser_eval_supervisor_path.py      |  65 ++----
+ tests/tools/test_browser_handoff.py           |  57 +++++
+ .../tools/test_browser_review_regressions.py  |  54 +++++
+ tests/tools/test_browser_snapshot_controls.py |  36 +++
+ .../tools/test_browser_three_review_fixes.py  |  64 ++++++
+ tools/browser_tool.py                         |  58 ++---
+ tools/browser_tool_handoff.py                 | 206 +++++++++++++++++
+ tools/browser_tool_session.py                 |  14 +-
+ tools/browser_tool_snapshot.py                |  87 ++++++--
+ 10 files changed, 740 insertions(+), 111 deletions(-)
+ create mode 100644 tests/tools/browser_page_binding_live.py
+ create mode 100644 tests/tools/test_browser_handoff.py
+ create mode 100644 tests/tools/test_browser_review_regressions.py
+ create mode 100644 tests/tools/test_browser_snapshot_controls.py
+ create mode 100644 tests/tools/test_browser_three_review_fixes.py
+ create mode 100644 tools/browser_tool_handoff.py
+
+diff --git a/tests/tools/browser_page_binding_live.py b/tests/tools/browser_page_binding_live.py
+new file mode 100644
+index 0000000000..e9ed59bfd6
+--- /dev/null
++++ b/tests/tools/browser_page_binding_live.py
+@@ -0,0 +1,210 @@
++"""Real Hermes tools/backend across fresh processes, isolated Chromium + fake ATS.
++
++Run with the CLI venv's Python, from this worktree. No model/API/production browser.
++"""
++import contextlib
++import http.server
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import sys
++import tempfile
++import threading
++import time
++import urllib.request
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++TASK = f'isolated-live-task-{os.getpid()}'
++OWNER = 'isolated-live-resume'
++
++
++@contextlib.contextmanager
++def cdp_client(endpoint):
++    from websockets.sync.client import connect
++    version = json.load(urllib.request.urlopen(endpoint + '/json/version'))
++    with connect(version['webSocketDebuggerUrl']) as ws:
++        seq = 0
++        def cdp(method, params=None):
++            nonlocal seq
++            seq += 1
++            ws.send(json.dumps({'id': seq, 'method': method, 'params': params or {}}))
++            while True:
++                msg = json.loads(ws.recv())
++                if msg.get('id') == seq:
++                    assert 'error' not in msg, msg
++                    return msg['result']
++        yield cdp
++
++
++def child(stage, base):
++    from tools import browser_tool as bt, browser_tool_session as session
++    from tools import browser_tool_handoff as handoff
++    global OWNER
++    if stage.startswith('timeout'):
++        OWNER = 'isolated-timeout-owner'
++    def call(fn, **kwargs):
++        entry = bt.registry.get_entry(fn.__name__)
++        out = json.loads(entry.handler(kwargs, task_id=TASK, session_id=OWNER))
++        print(fn.__name__, json.dumps(out)[:1500], flush=True)
++        assert out.get('success'), out
++        return out
++    def command(cmd, args):
++        out = session._run_browser_command(TASK, cmd, args)
++        assert out['success'], out
++        return out['data']
++    if stage == 'timeout':
++        call(bt.browser_snapshot, full=True)
++        info = session._get_session_info(TASK)
++        handoff.save(TASK, info, lambda cmd, args: session._run_browser_command(TASK, cmd, args))
++        assert json.loads(info['_page_handoff_path'].read_text())['target_id']
++        session._discard_timed_out_browser_session(TASK, info, session._prepare_session_socket_dir(info['session_name']))
++    if stage in ('closed', 'timeout', 'timeout-resume'):
++        for name, args in [('browser_snapshot', {}), ('browser_console', {}), ('browser_console', {'expression': 'document.title'})]:
++            out = json.loads(bt.registry.get_entry(name).handler(args, task_id=TASK, session_id=OWNER))
++            print('closed target', name, out, flush=True)
++            assert not out['success'], out
++        print('PASS missing exact target fails closed for snapshot and console; duplicate not substituted', flush=True)
++        return
++    if stage == 'first':
++        first = call(bt.browser_navigate, url=base + '/linkedin')
++        ref = re.search(r'link "Apply" \[ref=(e\d+)\]', first['snapshot']).group(1)
++        call(bt.browser_click, ref=ref)
++        deadline = time.monotonic() + 10
++        while True:
++            snap = call(bt.browser_snapshot, full=True)
++            if 'Fake Greenhouse' in snap['snapshot']:
++                break
++            assert time.monotonic() < deadline
++            time.sleep(.1)
++        assert 'frame_tree' not in snap, snap
++        assert re.search(r'option "Chosen country" \[selected[,\]]', snap['snapshot']), snap
++        for label in ('Last name', 'Country', 'Chosen country', 'Submit application'):
++            assert label in snap['snapshot'], (label, snap)
++        assert len(snap['snapshot']) <= bt.get_browser_snapshot_threshold()
++        assert list((Path(os.environ['HERMES_HOME']) / 'cache/web').glob('browser-snapshot-*.txt'))
++        ref = re.search(r'textbox[^\n]*\[[^\]]*ref=(e\d+)\]', snap['snapshot']).group(1)
++        call(bt.browser_type, ref=ref, text='Fixture filled state')
++        original = next(t['tabId'] for t in command('tab', ['list'])['tabs'] if t['active'])
++        command('tab', ['new', base + '/form'])
++        call(bt.browser_console, expression='document.querySelector("input").value="Duplicate state"')
++        command('tab', ['new', base + '/unrelated'])
++        command('tab', [original])  # exact backend id, never match by URL
++        out = call(bt.browser_console, expression='document.querySelector("input").value')
++        assert out['result'] == 'Fixture filled state'
++    else:
++        # First tool must attach and restore without open/reload/navigation.
++        snap = call(bt.browser_snapshot, full=True)
++        assert 'Fake Greenhouse' in snap['snapshot'] and 'Fixture filled state' in snap['snapshot'], snap
++        assert 'frame_tree' not in snap, snap
++        out = call(bt.browser_console, expression='({title:document.title,url:location.href,value:document.querySelector("input").value})')
++        assert out['result'] == {'title': 'Fake Greenhouse', 'url': base + '/form', 'value': 'Fixture filled state'}
++        with cdp_client(os.environ['BROWSER_CDP_URL']) as cdp:
++            old = next(t for t in cdp('Target.getTargets')['targetInfos'] if t['url'] == base + '/linkedin')
++            cdp('Target.closeTarget', {'targetId': old['targetId']})
++        out = call(bt.browser_console, expression='document.querySelector("input").value')
++        assert out['result'] == 'Fixture filled state'
++        tabs = command('tab', ['list'])['tabs']
++        assert sum(t['url'] == base + '/form' for t in tabs) == 2
++        assert any(t['url'] == base + '/unrelated' for t in tabs)
++        print('PASS two fresh processes: snapshot + console retain exact filled form; same-URL duplicate not guessed; old-source close safe; unrelated tab preserved', flush=True)
++    print('BACKEND_SESSION', session._get_session_info(TASK)['session_name'], 'TASK', TASK, flush=True)
++    # Normal interpreter exit runs Hermes's real browser cleanup, just as CLI exit.
++
++
++def main():
++    with tempfile.TemporaryDirectory(prefix='hermes-browser-fix-live-') as directory:
++        home = Path(directory)
++        env = {'HOME': str(home), 'HERMES_HOME': str(home / 'hermes'),
++               'PATH': os.environ['PATH'], 'LANG': 'C.UTF-8',
++               'AGENT_BROWSER_EXECUTABLE_PATH': '/usr/bin/chromium'}
++        (home / 'hermes').mkdir()
++        (home / 'hermes/config.yaml').write_text('browser:\n  allow_private_urls: true\n  backend: local\n')
++        (home / 'empty-agent-browser.json').write_text('{}')
++        env['AGENT_BROWSER_CONFIG'] = str(home / 'empty-agent-browser.json')
++        requests = []
++        class Handler(http.server.BaseHTTPRequestHandler):
++            def do_GET(self):
++                requests.append(self.path)
++                if self.path == '/linkedin':
++                    body = '<title>Fake LinkedIn</title><h1>Fake LinkedIn</h1><a href="/form" target="_blank">Apply</a>'
++                elif self.path == '/form':
++                    body = ('<title>Fake Greenhouse</title><h1>Fake Greenhouse</h1>' +
++                            '<p>' + 'Experience building software. ' * 1500 + '</p>' +
++                            '<form aria-label="Application"><label>Country<select required>' +
++                            ''.join(f'<option>Country {i}</option>' for i in range(900)) +
++                            '<option selected>Chosen country</option></select></label>' +
++                            '<label>Last name (required)<input required name="last"></label>' +
++                            '<button type="button">Submit application</button></form>')
++                else:
++                    body = '<title>Unrelated tab</title><h1>Unrelated tab</h1>'
++                self.send_response(200)
++                self.send_header('Content-Type', 'text/html')
++                self.end_headers()
++                self.wfile.write(body.encode())
++            def log_message(self, *args):
++                pass
++        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
++        threading.Thread(target=server.serve_forever, daemon=True).start()
++        base = f'http://127.0.0.1:{server.server_port}'
++        with (home / 'chromium.log').open('w') as chrome_log:
++            chrome = subprocess.Popen(['/usr/bin/chromium', '--headless=new', '--no-sandbox', '--disable-gpu',
++                                       '--disable-dev-shm-usage', '--remote-debugging-port=0',
++                                       f'--user-data-dir={home / "chrome"}', base + '/linkedin'],
++                                      env=env, stdout=chrome_log, stderr=chrome_log)
++            try:
++                port_file = home / 'chrome/DevToolsActivePort'
++                deadline = time.monotonic() + 15
++                while not port_file.exists():
++                    assert chrome.poll() is None
++                    assert time.monotonic() < deadline
++                    time.sleep(.05)
++                port = int(port_file.read_text().splitlines()[0])
++                assert port != 9333
++                env['BROWSER_CDP_URL'] = f'http://127.0.0.1:{port}'
++                names = []
++                for stage in ('first', 'resume'):
++                    result = subprocess.run([sys.executable, __file__, stage, base], env=env, cwd=ROOT,
++                                            text=True, capture_output=True, timeout=150)
++                    print(stage, 'pid exited', result.returncode, result.stdout, result.stderr, flush=True)
++                    assert result.returncode == 0, stage
++                    names.append(re.search(r'BACKEND_SESSION (\S+)', result.stdout).group(1))
++                assert names[0] != names[1], names
++                assert requests.count('/form') == 2, requests
++                print('PASS distinct fresh backend sessions; server confirms zero form renavigations on resume', names, flush=True)
++                binding = next((home / 'hermes/cache/browser-handoffs').glob('*.json'))
++                target_id = json.loads(binding.read_text())['target_id']
++                assert target_id
++                with cdp_client(env['BROWSER_CDP_URL']) as cdp:
++                    cdp('Target.closeTarget', {'targetId': target_id})
++                result = subprocess.run([sys.executable, __file__, 'closed', base], env=env, cwd=ROOT,
++                                        text=True, capture_output=True, timeout=60)
++                print(result.stdout, result.stderr, flush=True)
++                assert result.returncode == 0
++                for stage in ('timeout', 'timeout-resume'):
++                    result = subprocess.run([sys.executable, __file__, stage, base], env=env, cwd=ROOT,
++                                            text=True, capture_output=True, timeout=60)
++                    print(stage, result.stdout, result.stderr, flush=True)
++                    assert result.returncode == 0
++                assert requests.count('/form') == 2
++                with cdp_client(env['BROWSER_CDP_URL']) as cdp:
++                    targets = cdp('Target.getTargets')['targetInfos']
++                    assert any(t['url'] == base + '/form' for t in targets)
++                    assert any(t['url'] == base + '/unrelated' for t in targets)
++            finally:
++                chrome.terminate()
++                try:
++                    chrome.wait(timeout=10)
++                except subprocess.TimeoutExpired:
++                    chrome.kill()
++                    chrome.wait()
++                server.shutdown()
++
++
++if __name__ == '__main__':
++    if len(sys.argv) > 1:
++        child(sys.argv[1], sys.argv[2])
++    else:
++        main()
+diff --git a/tests/tools/test_browser_eval_supervisor_path.py b/tests/tools/test_browser_eval_supervisor_path.py
+index a6d76559aa..9725711632 100644
+--- a/tests/tools/test_browser_eval_supervisor_path.py
++++ b/tests/tools/test_browser_eval_supervisor_path.py
+@@ -1,9 +1,9 @@
+-"""Unit tests for the supervisor-WS fast path in browser_console / _browser_eval.
++"""Eval ownership and supervisor response-shaping contracts.
+ 
+-These exercise the dispatch logic in ``tools.browser_tool._browser_eval`` and
+-the response shaping in ``CDPSupervisor.evaluate_runtime`` using mocks — no
+-real browser, no real WebSocket.  Real-CDP coverage lives in
+-``tests/tools/test_browser_supervisor.py`` (gated on Chrome being installed).
++Console evaluation must use the command backend's active page, not the
++supervisor's independently attached page. The supervisor remains available
++for explicit consumers (dialogs/vault); its response shaping is tested here.
++Real tool/backend integration lives in ``browser_page_binding_live.py``.
+ """
+ from __future__ import annotations
+ 
+@@ -41,49 +41,26 @@ def _patch_supervisor(monkeypatch, supervisor):
+ class TestBrowserEvalSupervisorPath:
+     """The supervisor fast path replaces the agent-browser subprocess hop."""
+ 
+-    def test_primitive_result_routes_through_supervisor(self, monkeypatch):
++    @pytest.mark.parametrize("backend_result", [
++        {"success": True, "data": {"result": '{"page":"form"}'}},
++        {"success": False, "error": "Active target closed"},
++    ])
++    def test_eval_uses_command_owner_not_independent_supervisor(self, monkeypatch, backend_result):
+         import tools.browser_tool as bt
+ 
+         sup = MagicMock()
+-        sup.evaluate_runtime.return_value = {
+-            "ok": True,
+-            "result": 42,
+-            "result_type": "number",
+-        }
++        sup.evaluate_runtime.return_value = {"ok": True, "result": "unrelated old tab"}
+         _patch_supervisor(monkeypatch, sup)
+-        # If the subprocess path is hit we want a loud failure.
+-        monkeypatch.setattr(
+-            bt_session, "_run_browser_command",
+-            lambda *a, **kw: pytest.fail("subprocess path must not run when supervisor is healthy"),
+-        )
+-
+-        out = json.loads(bt._browser_eval("1 + 41"))
+-        assert out["success"] is True
+-        assert out["result"] == 42
+-        assert out["method"] == "cdp_supervisor"
+-        sup.evaluate_runtime.assert_called_once_with("1 + 41")
+-
+-    def test_json_string_result_is_parsed(self, monkeypatch):
+-        """Match agent-browser semantics: JSON-string results get parsed."""
+-        import tools.browser_tool as bt
+-
+-        sup = MagicMock()
+-        sup.evaluate_runtime.return_value = {
+-            "ok": True,
+-            "result": '{"a": 1, "b": [2, 3]}',
+-            "result_type": "string",
+-        }
+-        _patch_supervisor(monkeypatch, sup)
+-        monkeypatch.setattr(
+-            bt_session, "_run_browser_command",
+-            lambda *a, **kw: pytest.fail("subprocess path must not run"),
+-        )
+-
+-        out = json.loads(bt._browser_eval('JSON.stringify({a:1,b:[2,3]})'))
+-        assert out["success"] is True
+-        assert out["result"] == {"a": 1, "b": [2, 3]}
+-        # result_type reflects the parsed Python type, not the raw JS type.
+-        assert out["result_type"] == "dict"
++        command = MagicMock(return_value=backend_result)
++        monkeypatch.setattr(bt_session, "_run_browser_command", command)
++        out = json.loads(bt.browser_console(expression="document.title"))
++        assert out["success"] == backend_result["success"]
++        if out["success"]:
++            assert out["result"] == {"page": "form"}
++        else:
++            assert "Active target closed" in out["error"]
++        command.assert_called_once_with("test-task", "eval", ["document.title"])
++        sup.evaluate_runtime.assert_not_called()
+ 
+ 
+     def test_subprocess_reference_chain_error_becomes_guidance(self, monkeypatch):
+diff --git a/tests/tools/test_browser_handoff.py b/tests/tools/test_browser_handoff.py
+new file mode 100644
+index 0000000000..1ba5940711
+--- /dev/null
++++ b/tests/tools/test_browser_handoff.py
+@@ -0,0 +1,57 @@
++"""Durable browser handoff ownership is explicit, task/profile-scoped and fail-closed."""
++import json
++
++import pytest
++
++from tools import browser_tool as bt, browser_tool_handoff as handoff
++
++
++def test_handoff_uses_dispatch_identity_across_task_ids_not_global_env(tmp_path, monkeypatch):
++    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'profile-a'))
++    monkeypatch.setenv('HERMES_SESSION_ID', 'unrelated-env-owner')
++    make_info = lambda: {'cdp_url': 'ws://fixture/devtools/browser/exact-instance',
++                         'features': {'cdp_override': True}}
++    captured = []
++    monkeypatch.setattr(handoff, '_capture_target', lambda *a: 'exact-target')
++    monkeypatch.setattr(handoff, '_restore_target', lambda url, target, run: captured.append((url, target)))
++    assert handoff._binding_path('unknown-task', make_info()) is None
++    first = make_info()
++    # Exercise the same registry adapter as the real native tool path.
++    monkeypatch.setattr(bt, 'browser_snapshot', lambda **kw: handoff.prepare(kw['task_id'], first, 'snapshot', None))
++    bt._fallback_call('browser_snapshot', {})({}, {'task_id': 'round-one', 'session_id': 'conversation-a'})
++    handoff.save('round-one', first, None)  # cleanup is outside the tool context
++    path = first['_page_handoff_path']
++    assert json.loads(path.read_text())['target_id'] == 'exact-target'
++    with handoff.bind_owner('round-two', 'conversation-a'):
++        handoff.prepare('round-two', make_info(), 'snapshot', None)
++    assert captured == [(first['cdp_url'], 'exact-target')]
++    with handoff.bind_owner('other-task', 'conversation-b'):
++        handoff.prepare('other-task', make_info(), 'snapshot', None)
++    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'profile-b'))
++    with handoff.bind_owner('profile-task', 'conversation-a'):
++        handoff.prepare('profile-task', make_info(), 'snapshot', None)
++    assert len(captured) == 1  # neither a new session nor profile inherits ownership
++    assert handoff._binding_path('unknown-task', make_info()) is None
++
++
++@pytest.mark.parametrize('failure', ['capture', 'browser-replaced', 'target-closed'])
++def test_unavailable_handoff_never_runs_a_page_command_or_guesses(tmp_path, monkeypatch, failure):
++    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
++    first = {'cdp_url': 'ws://fixture/devtools/browser/one', 'features': {'cdp_override': True}}
++    def unavailable(*args):
++        raise RuntimeError('missing target')
++    monkeypatch.setattr(handoff, '_capture_target', unavailable if failure == 'capture' else lambda *a: 'exact-target')
++    monkeypatch.setattr(handoff, '_restore_target', unavailable)
++    with handoff.bind_owner('first-task', 'owner'):
++        handoff.prepare('first-task', first, 'open', None)
++    handoff.save('first-task', first, None)
++    fresh = {'cdp_url': first['cdp_url'] if failure != 'browser-replaced' else 'ws://fixture/devtools/browser/two',
++             'features': {'cdp_override': True}}
++    with handoff.bind_owner('next-task', 'owner'):
++        with pytest.raises(RuntimeError):
++            handoff.prepare('next-task', fresh, 'snapshot', lambda *a: pytest.fail('page command must not run'))
++        assert not fresh.get('_page_binding_ready')
++        # An explicit user navigation may abandon a stale binding; restore may not.
++        handoff.prepare('next-task', fresh, 'open', None)
++        assert fresh['_page_binding_ready']
++        assert not fresh['_page_handoff_path'].exists()
+diff --git a/tests/tools/test_browser_review_regressions.py b/tests/tools/test_browser_review_regressions.py
+new file mode 100644
+index 0000000000..540ea5300a
+--- /dev/null
++++ b/tests/tools/test_browser_review_regressions.py
+@@ -0,0 +1,54 @@
++"""Review regressions: fair snapshot budget, intact nesting, no foreign metadata."""
++import json
++from unittest.mock import MagicMock
++
++import pytest
++
++from tools import browser_tool as bt, browser_tool_snapshot as snapshots
++from tools import browser_tool_session as session
++
++
++@pytest.mark.parametrize('selected', ['[selected]', '[selected, ref=e999]'])
++def test_option_flood_cannot_starve_later_controls_or_selected_option(selected):
++    lines = ['- group "Application":', '  - combobox "Country" [ref=e1]:']
++    lines += [f'    - option "Country {i}"' for i in range(900)]
++    lines += [f'    - option "Chosen country" {selected}',
++              '  - text: Last name (required)',
++              '  - textbox "Last name" [ref=e2]',
++              '  - button "Submit application" [ref=e3]']
++    out = snapshots._compact_snapshot_lines(lines, 900)
++    for line in lines[-4:]:
++        assert line in out
++    assert sum(len(line) + 1 for line in out) <= 900
++
++
++def test_budget_selection_preserves_global_tree_order_and_ancestors():
++    lines = ['- group "Before":', '  - paragraph: ' + 'Long prose. ' * 500,
++             '- group "Application":', '  - textbox "Name" [ref=e1]',
++             '  - text: Application Help', '- paragraph: Footer']
++    out = snapshots._compact_snapshot_lines(lines, 280)
++    indices = [lines.index(line) for line in out]
++    assert indices == sorted(indices)
++    assert out.index('- group "Application":') < out.index('  - text: Application Help')
++    # Its most recent equally-indented ancestor must still be Application.
++    ancestors = [line for line in out[:out.index('  - text: Application Help')] if line.startswith('- ')]
++    assert ancestors[-1] == '- group "Application":'
++
++
++@pytest.mark.parametrize('supervisor_url', ['https://old.example/start', 'https://form.example/apply'])
++def test_snapshot_omits_supervisor_metadata_without_exact_backend_identity(monkeypatch, supervisor_url):
++    from tools.browser_supervisor import SUPERVISOR_REGISTRY
++    supervisor = MagicMock()
++    supervisor.snapshot.return_value.active = True
++    supervisor.snapshot.return_value.to_dict.return_value = {
++        'frame_tree': {'top': {'url': supervisor_url}}, 'pending_dialogs': [{'id': 'foreign'}]}
++    monkeypatch.setattr(SUPERVISOR_REGISTRY, 'get', lambda _: supervisor)
++    monkeypatch.setattr(bt, '_is_camofox_mode', lambda: False)
++    monkeypatch.setattr(bt, '_blocked_private_page_content', lambda _: None)
++    monkeypatch.setattr(session, '_run_browser_command', lambda *a, **kw: {
++        'success': True, 'data': {'snapshot': '- textbox "Application" [ref=e1]', 'refs': {},
++                                 'url': 'https://form.example/apply'}})
++    out = json.loads(bt.browser_snapshot(task_id='review'))
++    assert out['success']
++    assert 'frame_tree' not in out
++    assert 'pending_dialogs' not in out
+diff --git a/tests/tools/test_browser_snapshot_controls.py b/tests/tools/test_browser_snapshot_controls.py
+new file mode 100644
+index 0000000000..2e1063c43a
+--- /dev/null
++++ b/tests/tools/test_browser_snapshot_controls.py
+@@ -0,0 +1,36 @@
++"""Oversized accessibility trees must still expose actionable controls."""
++from pathlib import Path
++
++import pytest
++from tools import browser_tool, browser_tool_snapshot as snapshots
++
++
++@pytest.mark.parametrize("form", [True, False])
++def test_oversized_snapshot_keeps_controls_and_context_inline(tmp_path, monkeypatch, form):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    prefix = ('- paragraph: Long job description.\n' * 700) + '- paragraph: ' + ('Oversized line. ' * 1500) + '\n'
++    controls = ('- group "Application":\n'
++                '  - text: First name (required)\n'
++                '  - textbox "First name" [ref=e30] [required]\n'
++                '  - combobox "Country" [ref=e31]:\n'
++                '    - option "India" [selected]\n'
++                '    - option "Other"\n'
++                '  - button "Submit application" [ref=e32]') if form else (
++                '- heading "Article" [level=1]\n- link "Next article" [ref=e99]')
++    full = prefix + controls
++    captured = []
++    original = snapshots._store_full_snapshot
++    def store(text):
++        path = original(text)
++        captured.append(path)
++        return path
++    monkeypatch.setattr(snapshots, "_store_full_snapshot", store)
++    out = browser_tool._snapshot_fields({"data": {"snapshot": full, "refs": {}}})["snapshot"]
++    for line in controls.splitlines():
++        assert line in out
++    assert len(out) <= browser_tool.get_browser_snapshot_threshold()
++    # Budget priority does not reorder the accessibility tree's parentage.
++    if 'Long job description' in out:
++        assert out.index('Long job description') < out.index('[ref=e30]' if form else '[ref=e99]')
++    assert Path(captured[0]).read_text() == full
++    assert snapshots._truncate_snapshot(controls) == controls
+diff --git a/tests/tools/test_browser_three_review_fixes.py b/tests/tools/test_browser_three_review_fixes.py
+new file mode 100644
+index 0000000000..d11f87259e
+--- /dev/null
++++ b/tests/tools/test_browser_three_review_fixes.py
+@@ -0,0 +1,64 @@
++"""Regression contracts for timeout ownership, action budgets and console errors."""
++import json
++from unittest.mock import Mock
++
++import pytest
++from tools import browser_tool as bt, browser_tool_session as session
++from tools import browser_tool_handoff as handoff, browser_tool_snapshot as snapshots
++
++
++def test_timeout_replacement_cannot_inherit_readiness_or_stale_saved_target(tmp_path, monkeypatch):
++    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
++    info = {'session_name': 'old', 'cdp_url': 'ws://fixture/browser', 'features': {'cdp_override': True}}
++    monkeypatch.setattr(handoff, '_capture_target', lambda *a: 'previous-page')
++    restore = Mock()
++    monkeypatch.setattr(handoff, '_restore_target', restore)
++    monkeypatch.setattr(session._cdp, '_stop_cdp_supervisor', lambda *a: None)
++    monkeypatch.setattr(bt, '_active_sessions', {'review-timeout': info})
++    with handoff.bind_owner('review-timeout', 'durable-owner'):
++        handoff.prepare('review-timeout', info, 'open', None)
++        handoff.save('review-timeout', info, None)
++        session._discard_timed_out_browser_session('review-timeout', info, str(tmp_path / 'sockets'))
++        replacement = bt._active_sessions['review-timeout']
++        assert not replacement.get('_page_binding_ready')
++        with pytest.raises(RuntimeError):
++            handoff.prepare('review-timeout', replacement, 'snapshot', None)
++    # A clean process must not restore the checkpoint from BEFORE the timeout.
++    with handoff.bind_owner('fresh-task', 'durable-owner'):
++        fresh = {'cdp_url': info['cdp_url'], 'features': info['features']}
++        path = handoff._binding_path('fresh-task', fresh)
++        assert path == info['_page_handoff_path'], (path, info)
++        assert json.loads(path.read_text())['target_id'] is None
++        with pytest.raises(RuntimeError):
++            handoff.prepare('fresh-task', fresh, 'snapshot', None)
++    restore.assert_not_called()
++
++
++@pytest.mark.parametrize('role', ['menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'treeitem', 'listbox', 'gridcell', 'custom-control'])
++def test_all_ref_controls_take_priority_over_prose(role):
++    lines = ['- paragraph: prose'] * 10 + [f'- {role} "Choose" [ref=e1]', '- tab "Details" [ref=e2]']
++    out = snapshots._compact_snapshot_lines(lines, 180)
++    assert lines[-2] in out and lines[-1] in out
++    assert sum(len(line) + 1 for line in out) <= 180
++
++
++@pytest.mark.parametrize('failed_command', ['console', 'errors'])
++def test_console_without_expression_propagates_backend_errors(monkeypatch, failed_command):
++    monkeypatch.setattr(bt, '_is_camofox_mode', lambda: False)
++    monkeypatch.setattr(bt, '_blocked_private_page_content', lambda _: None)
++    def run(task, command, args):
++        return {'success': False, 'error': 'Saved browser page is unavailable'} if command == failed_command else {'success': True, 'data': {}}
++    monkeypatch.setattr(session, '_run_browser_command', run)
++    out = json.loads(bt.registry.get_entry('browser_console').handler({}, task_id='review', session_id='owner'))
++    assert not out['success']
++    assert 'Saved browser page is unavailable' in out['error']
++
++
++def test_partial_marker_eval_failure_still_removes_marker():
++    calls = []
++    def run(command, args):
++        calls.append(args[0])
++        return {'success': args[0].startswith('delete '), 'data': {'result': True}}
++    with pytest.raises(RuntimeError):
++        handoff._capture_target('unused', run)
++    assert len(calls) == 2 and calls[-1].startswith('delete ')
+diff --git a/tools/browser_tool.py b/tools/browser_tool.py
+index 104bc7694d..87e0536b3a 100644
+--- a/tools/browser_tool.py
++++ b/tools/browser_tool.py
+@@ -796,17 +796,11 @@ def browser_snapshot(
+     response = {"success": True, **_snapshot_fields(result)}
+     _lp._copy_fallback_warning(response, result)
+ 
+-    # Merge supervisor state (pending dialogs + frame tree) when a CDP supervisor is
+-    # attached. See website/docs/developer-guide/browser-supervisor.md.
+-    try:
+-        from tools.browser_supervisor import SUPERVISOR_REGISTRY  # type: ignore[import-not-found]
+-        _supervisor = SUPERVISOR_REGISTRY.get(effective_task_id)
+-        if _supervisor is not None:
+-            _sv_snap = _supervisor.snapshot()
+-            if _sv_snap.active:
+-                response.update(_snapshot._redact_browser_output(_sv_snap.to_dict()))
+-    except Exception as _sv_exc:
+-        logger.debug("supervisor snapshot merge failed: %s", _sv_exc)
++    # The command backend does not expose the snapshot's exact CDP target ID.
++    # The supervisor independently attaches to a page, so neither its URL nor
++    # its tab order proves ownership (even equal URLs can be different forms).
++    # Omit its metadata rather than splice a foreign tree/dialog into this page.
++    # Explicit dialog/vault consumers and the supervisor lifecycle are unchanged.
+ 
+     return _dumps(response)
+ 
+@@ -956,7 +950,11 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
+ 
+     clear_args = ["--clear"] if clear else []
+     console_result = _session._run_browser_command(effective_task_id, "console", clear_args)
++    if not console_result.get("success"):
++        return _tool_response(console_result, {}, "Failed to read browser console")
+     errors_result = _session._run_browser_command(effective_task_id, "errors", clear_args)
++    if not errors_result.get("success"):
++        return _tool_response(errors_result, {}, "Failed to read browser errors")
+ 
+     messages = [
+         {"type": msg.get("type", "log"), "text": _snapshot._redact_browser_output(msg.get("text", "")), "source": "console"}
+@@ -1001,31 +999,6 @@ def _eval_result_or_blocked(effective_task_id: str, parsed: Any, result: Dict[st
+     return _dumps(_lp._copy_fallback_warning(_eval_ok_response(parsed, **extra), result), default=str)
+ 
+ 
+-def _eval_supervisor_fast_path(effective_task_id: str, expression: str) -> Optional[str]:
+-    """``Runtime.evaluate`` on the CDP supervisor's persistent WebSocket (no subprocess cost).
+-    Tool JSON when the supervisor gave a definitive answer (value, blocked page, or a real
+-    JS-side exception — NOT retried via subprocess, that would just reproduce it slower);
+-    None to fall through to the subprocess path."""
+-    try:
+-        from tools.browser_supervisor import SUPERVISOR_REGISTRY  # type: ignore[import-not-found]
+-        supervisor = SUPERVISOR_REGISTRY.get(effective_task_id)
+-        if supervisor is None:
+-            return None
+-        sup_result = supervisor.evaluate_runtime(expression)
+-        if sup_result.get("ok"):
+-            return _eval_result_or_blocked(
+-                effective_task_id, _parse_eval_value(sup_result.get("result")), {}, method="cdp_supervisor")
+-        err = sup_result.get("error") or "evaluate_runtime failed"
+-        if "supervisor" not in err.lower():
+-            return _dumps(_err(err))
+-        logger.debug("browser_eval: supervisor path unavailable (%s), falling back to subprocess", err)
+-    except ImportError:
+-        pass
+-    except Exception as exc:  # pragma: no cover — defensive
+-        logger.debug("browser_eval: supervisor path errored (%s), falling back", exc)
+-    return None
+-
+-
+ def _eval_failure_response(result: Dict[str, Any]) -> str:
+     """Tool JSON for a failed ``agent-browser eval``, with actionable rewrites of known errors."""
+     err = result.get("error", "eval failed")
+@@ -1063,10 +1036,11 @@ def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
+     if _is_camofox_mode():
+         return _camofox_eval(expression, task_id)
+ 
+-    fast = _eval_supervisor_fast_path(effective_task_id, expression)
+-    if fast is not None:
+-        return fast
+-
++    # agent-browser owns the active page (including popup/tab switches). The
++    # supervisor's initial page session is independent and may even be closed.
++    # Without an exact shared target identity, evaluating there can read another
++    # tab and bypass the page-URL guard's target. Use the same owner as snapshots
++    # and input actions; never retry an unknown target on a guessed page.
+     result = _session._run_browser_command(effective_task_id, "eval", [expression])
+     if not result.get("success"):
+         return _eval_failure_response(result)
+@@ -1272,7 +1246,9 @@ def _fallback_call(fn_name: str, arg_defaults: Dict[str, Any], extra_kw: tuple =
+         params["task_id"] = kw.get("task_id")
+         for k in extra_kw:
+             params[k] = kw.get(k)
+-        return globals()[fn_name](**params)
++        from tools.browser_tool_handoff import bind_owner
++        with bind_owner(kw.get("task_id"), kw.get("session_id")):
++            return globals()[fn_name](**params)
+     return call
+ 
+ 
+diff --git a/tools/browser_tool_handoff.py b/tools/browser_tool_handoff.py
+new file mode 100644
+index 0000000000..9a6bb3ca1d
+--- /dev/null
++++ b/tools/browser_tool_handoff.py
+@@ -0,0 +1,206 @@
++"""Exact external-CDP page handoff across clean Hermes process exits.
++
++agent-browser tab IDs belong to a daemon, not a browser. Save a Chrome target ID
++under the durable conversation, then map it into the fresh daemon with a temporary
++page nonce. No URL/title/order matching, daemon sharing, navigation or tab closure.
++This is a locator, NOT authority for vault fills or supervisor metadata.
++"""
++from contextlib import contextmanager
++from contextvars import ContextVar
++import hashlib
++import json
++import logging
++import time
++import uuid
++
++logger = logging.getLogger(__name__)
++_call_owner: ContextVar[tuple[str | None, str | None] | None] = ContextVar('browser_handoff_owner', default=None)
++
++
++@contextmanager
++def bind_owner(task_id, session_id):
++    """Registry-provided identity only; never inherit process-global session env."""
++    token = _call_owner.set((task_id, session_id))
++    try:
++        yield
++    finally:
++        _call_owner.reset(token)
++
++
++def _binding_path(task_id, info):
++    from hermes_constants import get_hermes_home
++
++    if not info.get('features', {}).get('cdp_override'):
++        return None
++    # Retain the established task/profile binding for cleanup after the tool's
++    # ContextVar scope has ended. Fresh CLI turns have fresh task IDs, but the
++    # dispatcher supplies the same durable session_id on --resume.
++    identity = _call_owner.get()
++    if info.get('_page_handoff_task') == task_id:
++        if identity is not None and identity != (task_id, info['_page_handoff_owner']):
++            raise RuntimeError('Browser handoff ownership mismatch')
++        return info['_page_handoff_path']
++    if not identity or not task_id or identity[0] != task_id or not identity[1]:
++        return None
++    key = hashlib.sha256(identity[1].encode()).hexdigest()
++    path = get_hermes_home() / 'cache' / 'browser-handoffs' / (key + '.json')
++    info['_page_handoff_task'] = task_id
++    info['_page_handoff_owner'] = identity[1]
++    info['_page_handoff_path'] = path
++    return path
++
++
++@contextmanager
++def _cdp_client(endpoint):
++    from websockets.sync.client import connect
++
++    with connect(endpoint, open_timeout=5, close_timeout=2) as ws:
++        seq = 0
++        def call(method, params=None, session_id=None):
++            nonlocal seq
++            seq += 1
++            message = {'id': seq, 'method': method, 'params': params or {}}
++            if session_id:
++                message['sessionId'] = session_id
++            ws.send(json.dumps(message))
++            deadline = time.monotonic() + 5
++            while True:
++                remaining = deadline - time.monotonic()
++                if remaining <= 0:
++                    raise TimeoutError('CDP page ownership probe timed out')
++                response = json.loads(ws.recv(timeout=remaining))
++                if response.get('id') == seq:
++                    if 'error' in response:
++                        raise RuntimeError('CDP page ownership probe failed')
++                    return response.get('result', {})
++        yield call
++
++
++@contextmanager
++def _target_session(cdp, target):
++    sid = cdp('Target.attachToTarget', {'targetId': target, 'flatten': True})['sessionId']
++    try:
++        yield sid
++    finally:
++        cdp('Target.detachFromTarget', {'sessionId': sid})
++
++
++def _evaluate(cdp, sid, expression):
++    result = cdp('Runtime.evaluate', {'expression': expression, 'returnByValue': True}, sid)
++    if result.get('exceptionDetails'):
++        raise RuntimeError('CDP page ownership expression failed')
++    return result.get('result', {}).get('value')
++
++
++def _backend_value(run, expression):
++    result = run('eval', [expression])
++    if not result.get('success'):
++        raise RuntimeError('Command backend page ownership probe failed')
++    return result.get('data', {}).get('result')
++
++
++def _marker():
++    # A random non-enumerable property, deleted after the identity handshake.
++    # Using the document rather than storage avoids touching app-owned state.
++    key = json.dumps('__hermes_page_' + uuid.uuid4().hex)
++    return (f'Object.defineProperty(document, {key}, {{value: true, configurable: true}}); true',
++            f'document[{key}] === true', f'delete document[{key}]')
++
++
++def _capture_target(endpoint, run):
++    mark, probe, remove = _marker()
++    try:
++        _backend_value(run, mark)
++        with _cdp_client(endpoint) as cdp:
++            matches = []
++            for target in cdp('Target.getTargets')['targetInfos']:
++                if target.get('type') not in ('page', 'webview'):
++                    continue
++                with _target_session(cdp, target['targetId']) as sid:
++                    if _evaluate(cdp, sid, probe) is True:
++                        matches.append(target['targetId'])
++            if len(matches) != 1:
++                raise RuntimeError('Cannot prove the command backend page identity')
++            return matches[0]
++    finally:
++        _backend_value(run, remove)
++
++
++def _restore_target(endpoint, target_id, run):
++    mark, probe, remove = _marker()
++    with _cdp_client(endpoint) as cdp:
++        # attachToTarget fails for a closed target; never fall back to another.
++        with _target_session(cdp, target_id) as sid:
++            try:
++                _evaluate(cdp, sid, mark)
++                result = run('tab', ['list'])
++                if not result.get('success'):
++                    raise RuntimeError('Cannot list command backend tabs')
++                tabs = result.get('data', {}).get('tabs', [])
++                matches = []
++                for tab in tabs:
++                    tab_id = tab.get('tabId')
++                    if not isinstance(tab_id, str) or not tab_id:
++                        raise RuntimeError('Backend does not support stable tab selection')
++                    if not run('tab', [tab_id]).get('success'):
++                        raise RuntimeError('Cannot select command backend tab')
++                    if _backend_value(run, probe) is True:
++                        matches.append(tab_id)
++                if len(matches) != 1 or not run('tab', [matches[0]]).get('success'):
++                    raise RuntimeError('Cannot restore the exact application page')
++                if _backend_value(run, probe) is not True:
++                    raise RuntimeError('Application page changed during restore')
++            finally:
++                _evaluate(cdp, sid, remove)
++
++
++def invalidate(task_id, info):
++    """A timed-out command may have switched pages after the last checkpoint."""
++    info.pop('_page_binding_ready', None)
++    info['_page_binding_uncertain'] = True
++    path = _binding_path(task_id, info)
++    if path is not None:
++        from utils import atomic_json_write
++        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
++        atomic_json_write(path, {'target_id': None}, mode=0o600)
++
++
++def prepare(task_id, info, command, run):
++    """Restore once per fresh daemon before ANY page command; explicit open opts out."""
++    path = _binding_path(task_id, info)
++    if path is None or command == 'close':
++        return
++    if command == 'open':
++        path.unlink(missing_ok=True)
++        info.pop('_page_binding_uncertain', None)
++        info['_page_binding_ready'] = True
++        return
++    if info.get('_page_binding_uncertain'):
++        raise RuntimeError('Saved browser page is unavailable after a timeout; navigate explicitly to choose a new page')
++    if info.get('_page_binding_ready'):
++        return
++    if path.exists():
++        saved = json.loads(path.read_text())
++        browser = hashlib.sha256(info['cdp_url'].encode()).hexdigest()
++        if saved.get('browser') != browser or not saved.get('target_id'):
++            raise RuntimeError('Saved browser page is unavailable; navigate explicitly to choose a new page')
++        _restore_target(info['cdp_url'], saved['target_id'], run)
++    info['_page_binding_ready'] = True
++
++
++def save(task_id, info, run):
++    """Checkpoint the exact page before clean daemon teardown, not on every action."""
++    path = _binding_path(task_id, info)
++    if path is None or not info.get('_page_binding_ready'):
++        return
++    from utils import atomic_json_write
++
++    saved = {'browser': hashlib.sha256(info['cdp_url'].encode()).hexdigest(), 'target_id': None}
++    try:
++        saved['target_id'] = _capture_target(info['cdp_url'], run)
++    except Exception:
++        # A tombstone is deliberate: the next process must not silently attach to
++        # the first tab when ownership could not be established at handoff.
++        logger.warning('Could not preserve exact browser page for resume', exc_info=True)
++    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
++    atomic_json_write(path, saved, mode=0o600)
+diff --git a/tools/browser_tool_session.py b/tools/browser_tool_session.py
+index 4b9b353b3e..5e5401f35c 100644
+--- a/tools/browser_tool_session.py
++++ b/tools/browser_tool_session.py
+@@ -324,6 +324,8 @@ def _discard_timed_out_browser_session(task_id: str, session_info: Dict[str, Any
+             replacement = dict(session_info)
+             replacement["session_name"] = f"h_{uuid.uuid4().hex[:10]}"
+             replacement.pop("_first_nav", None)
++            from tools import browser_tool_handoff as handoff
++            handoff.invalidate(task_id, replacement)
+             _bt._active_sessions[task_id] = replacement
+         else:
+             _bt._active_sessions.pop(task_id, None)
+@@ -592,10 +594,18 @@ def _run_browser_command(
+         if engine != "auto" and not _bt._is_camofox_mode():
+             backend_args += ["--engine", engine]
+ 
+-    cmd_parts = _agent_browser_argv(browser_cmd) + backend_args + ["--json", command] + args
++    command_prefix = _agent_browser_argv(browser_cmd) + backend_args + ["--json"]
++
++    def run(cmd, cmd_args):
++        return _spawn_and_collect(task_id, session_info, command_prefix + [cmd] + cmd_args,
++                                  cmd, engine, timeout)
+ 
+     try:
+-        result = _spawn_and_collect(task_id, session_info, cmd_parts, command, engine, timeout)
++        from tools import browser_tool_handoff as handoff
++        handoff.prepare(task_id, session_info, command, run)
++        if command == "close":
++            handoff.save(task_id, session_info, run)
++        result = run(command, args)
+     except Exception as e:
+         _bt.logger.warning("browser '%s' exception: %s", command, e, exc_info=True)
+         result = {"success": False, "error": str(e)}
+diff --git a/tools/browser_tool_snapshot.py b/tools/browser_tool_snapshot.py
+index 5a1329a7d3..cd62bf0d22 100644
+--- a/tools/browser_tool_snapshot.py
++++ b/tools/browser_tool_snapshot.py
+@@ -66,12 +66,65 @@ def _store_full_snapshot(snapshot_text: str) -> Optional[str]:
+         return None
+ 
+ 
++def _compact_snapshot_lines(lines: list[str], budget: int) -> list[str]:
++    """Select original lines, never regenerate refs or let prose crowd out controls.
++
++    Include structural ancestors, nearby labels/help and option children. Selection
++    is control-first, presentation stays in tree order so nesting remains meaningful.
++    """
++    role = re.compile(r'^\s*(?:- )?(textbox|combobox|checkbox|radio|spinbutton|slider|switch|searchbox|button|link|menuitem|menuitemcheckbox|menuitemradio|tab|treeitem|listbox|gridcell|scrollbar)\b')
++    indents = [len(line) - len(line.lstrip()) for line in lines]
++    parents: list[list[int]] = []
++    stack: list[int] = []
++    for i, line in enumerate(lines):
++        while stack and indents[stack[-1]] >= indents[i]:
++            stack.pop()
++        parents.append(stack.copy())
++        if line.strip():
++            stack.append(i)
++    # Options often have refs too: keep them in their selected-first budget pass.
++    controls = [i for i, line in enumerate(lines) if role.match(line) or (
++        re.search(r'\[[^\]]*\bref=', line)
++        and not re.match(r'^\s*(?:- )?option\b', line))]
++    selected: set[int] = set()
++    used = 0
++
++    def include(indices):
++        nonlocal used
++        for i in indices:
++            # A child without its ancestors can appear to belong to an entirely
++            # different group after omissions. Admit contextualized blocks only.
++            block = [j for j in parents[i] + [i] if j not in selected]
++            cost = sum(len(lines[j]) + 1 for j in block)
++            if used + cost <= budget:
++                selected.update(block)
++                used += cost
++
++    # Finish each budget pass globally. An early combobox's option subtree
++    # must not spend the budget reserved for later fields or Submit.
++    include(controls)
++    include(i for i, line in enumerate(lines)
++            if re.match(r'^\s*(?:- )?option\b', line)
++            and re.search(r'\[[^\]]*\bselected(?:=true)?(?=[,\]])', line))
++    context = set()
++    for i in controls:
++        context.update(j for j in range(max(0, i - 2), min(len(lines), i + 3))
++                       if len(lines[j]) < 300
++                       and re.match(r'^\s*- (text|StaticText|heading)\b', lines[j]))
++    include(sorted(context))
++    include(i for i, line in enumerate(lines) if re.match(r'^\s*- heading\b', line))
++    include(i for i, line in enumerate(lines) if re.match(r'^\s*(?:- )?option\b', line))
++    # Non-form pages and residual space retain prose too, but never
++    # ahead of the three form-budget passes above.
++    include(range(len(lines)))
++    return [lines[i] for i in sorted(selected)]
++
++
+ def _truncate_snapshot(snapshot_text: str, max_chars: Optional[int] = None) -> str:
+-    """Truncate a snapshot at line boundaries (never mid-element) to ``max_chars``.
++    """Keep controls and their context inline within ``max_chars``; store the full tree.
+ 
+-    Defaults to ``browser.snapshot_threshold``. The full snapshot is stored to
+-    cache/web and the appended note tells the agent how to page through it
+-    with read_file — element refs beyond the cut are in the file, not lost.
++    Short snapshots are byte-for-byte unchanged. Oversized trees retain original
++    refs, labels, required state and options rather than only a prose prefix.
+     """
+     if max_chars is None:
+         max_chars = _bt.get_browser_snapshot_threshold()
+@@ -85,26 +138,12 @@ def _truncate_snapshot(snapshot_text: str, max_chars: Optional[int] = None) -> s
+         stored_path = to_agent_visible_cache_path(stored_path)
+ 
+     lines = snapshot_text.split('\n')
+-    result: list[str] = []
+-    chars = 0
+-    # Reserve space for the truncation note (the stored-path variant is the
+-    # longer of the two). Clamp so tiny max_chars values still keep content.
+-    reserve = min(110 + len(stored_path or ""), max_chars // 2)
+-    for line in lines:
+-        if chars + len(line) + 1 > max_chars - reserve:
+-            break
+-        result.append(line)
+-        chars += len(line) + 1
+-    remaining = len(lines) - len(result)
+-    if remaining > 0:
+-        if stored_path:
+-            next_line = len(result) + 1
+-            result.append(
+-                f'\n[... {remaining} more lines truncated — full snapshot: '
+-                f'read_file path="{stored_path}" offset={next_line} limit=200]'
+-            )
+-        else:
+-            result.append(f'\n[... {remaining} more lines truncated, use browser_snapshot for full content]')
++    note = (f'\n[... {{remaining}} more lines truncated — controls-first compact view; '
++            f'full snapshot: read_file path="{stored_path}" offset=1]') if stored_path else (
++            '\n[... {remaining} more lines truncated — controls-first compact view; full snapshot storage unavailable]')
++    reserve = len(note.format(remaining=len(lines))) + 1
++    result = _compact_snapshot_lines(lines, max(0, max_chars - reserve))
++    result.append(note.format(remaining=len(lines) - len(result)))
+     return '\n'.join(result)
+ 
+ 
+-- 
+2.47.3
+

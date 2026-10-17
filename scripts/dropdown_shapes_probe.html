@@ -1,0 +1,215 @@
+<!doctype html>
+<!--
+Local copies of the dropdown shapes that defeated the apply agent on real
+forms (checked live on 2026-10-01, nothing submitted):
+  * Workday button-listbox: <button aria-haspopup=listbox> is the control; a
+    0x0 text input beside it only stores the option id and is ignored when
+    written. Picking rewrites the button's aria-label to include the value.
+    Long lists scroll themselves to the current value just after opening.
+    A sticky Cancel/Submit bar covers the bottom of the window.
+  * Workday search prompt (Skills / How Did You Hear / School): type, Enter
+    to search, click a result to add a pill. Results always include an
+    "echo" row (id "menuItem-" + typed text) that invents the typed value.
+    Some sites have no catalogue at all: Enter itself saves free text.
+  * Angular Material mat-select (Bellows/Juniperx on Zwayam): aria-labelledby
+    gains the value-text id once picked; a long question label can float
+    over the trigger.
+  * Consent checkbox with no <label>, only a sentence beside it.
+-->
+<html><head><meta charset="utf-8"><title>dropdown shapes</title>
+<style>
+  body{font:14px sans-serif;margin:20px;padding-bottom:120px}
+  .wd-field{margin:14px 0}
+  .wd-store{width:0;height:0;border:0;padding:0;margin:0;position:absolute}
+  button[aria-haspopup]{width:320px;height:36px;text-align:left}
+  .wd-list{position:absolute;max-height:200px;overflow-y:auto;background:#fff;border:1px solid #888;width:320px;z-index:20;margin:0;padding:0;list-style:none}
+  .wd-list li{height:32px;line-height:32px;padding-left:6px;cursor:pointer}
+  .footer{position:fixed;left:0;right:0;bottom:0;height:70px;background:#eee;z-index:10}
+  .spacer{height:900px}
+  .prompt{position:relative;width:320px;border:1px solid #888;min-height:36px}
+  .prompt input{width:300px;height:30px;border:0}
+  .pills{position:absolute;left:0;top:0;margin:0;padding:0;list-style:none;pointer-events:auto}
+  .pills [data-automation-id=selectedItem]{background:#cde;padding:4px 12px;display:inline-block;width:260px}
+  .results{position:absolute;background:#fff;border:1px solid #888;width:320px;z-index:20}
+  .results [role=option]{height:30px;line-height:30px;padding-left:6px;cursor:pointer}
+  mat-form-field{display:block;position:relative;margin:14px 0;width:560px}
+  mat-select{display:block;height:28px;border:1px solid #888;cursor:pointer}
+  mat-label.float{position:absolute;left:0;top:2px;width:560px;height:26px;background:rgba(255,255,255,.6)}
+  .overlay [role=option]{height:28px;line-height:28px;cursor:pointer}
+  .overlay{position:absolute;background:#fff;border:1px solid #888;z-index:30;width:300px}
+</style></head><body>
+
+<h3>Workday</h3>
+<div data-automation-id="formField-phoneDeviceType" class="wd-field">
+  <label for="input-5">Phone Device Type</label>
+  <div><button type="button" aria-haspopup="listbox" id="input-5" data-automation-id="phoneDeviceType"
+      data-options="Landline|Mobile|TTY/TDD" data-label="Phone Device Type" value="">Select One</button><input type="text" class="wd-store" value=""></div>
+</div>
+<div data-automation-id="formField-countryDropdown" class="wd-field">
+  <label for="input-1">Country*</label>
+  <div><button type="button" aria-haspopup="listbox" id="input-1" data-automation-id="countryDropdown"
+      data-options="@countries" data-label="Country" data-current="United Kingdom" value="gb">United Kingdom</button><input type="text" class="wd-store" value="gb"></div>
+</div>
+
+<div data-automation-id="formField-skills" class="wd-field">
+  <label for="skills">Type to Add Skills</label>
+  <div class="prompt" data-automation-id="multiselectInputContainer" data-catalog="1">
+    <ul class="pills" data-automation-id="selectedItemList"></ul>
+    <input id="skills" placeholder="Search" data-uxi-widget-type="selectinput" autocomplete="off">
+  </div>
+</div>
+<div data-automation-id="formField-hobbies" class="wd-field">
+  <label for="hobbies">Hobbies</label>
+  <div class="prompt" data-automation-id="multiselectInputContainer" data-catalog="0">
+    <ul class="pills" data-automation-id="selectedItemList"></ul>
+    <input id="hobbies" placeholder="Search" data-uxi-widget-type="selectinput" autocomplete="off">
+  </div>
+</div>
+
+<h3>Angular Material</h3>
+<mat-form-field>
+  <mat-label id="lab-gender">Gender</mat-label>
+  <mat-select id="mat-select-2" role="combobox" tabindex="0" aria-required="true" aria-labelledby="lab-gender"
+      data-options="Male|Female|Prefer not to say"><span class="mat-mdc-select-value-text" id="val-gender"></span></mat-select>
+</mat-form-field>
+<mat-form-field>
+  <mat-label id="lab-ug">UG Qualification</mat-label>
+  <mat-select id="mat-select-4" role="combobox" tabindex="0" aria-required="true" aria-labelledby="lab-ug"
+      data-options="B.Arch|B.Tech/B.E.|B.Sc"><span class="mat-mdc-select-value-text" id="val-ug"></span></mat-select>
+</mat-form-field>
+<mat-form-field>
+  <mat-label id="lab-auth" class="float">Are you authorized to work permanently in the location in which you are expressing an interest?</mat-label>
+  <mat-select id="mat-select-18" role="combobox" tabindex="0" aria-required="true" aria-labelledby="lab-auth"
+      data-options="Yes|No"><span class="mat-mdc-select-value-text" id="val-auth"></span></mat-select>
+</mat-form-field>
+<div class="row"><input type="checkbox" data-testid="terms-checkbox"> BELLOWS Limited and its subsidiaries (together 'we', 'us' or 'our') and our service providers will process the personal data you share with us for the purposes of recruitment, as described in our privacy notice.</div>
+
+<div class="spacer"></div>
+<div data-automation-id="formField-countryPhoneCode" class="wd-field">
+  <label for="input-6">Country Phone Code</label>
+  <div><button type="button" aria-haspopup="listbox" id="input-6" data-automation-id="countryPhoneCode"
+      data-options="Germany (+49)|India (+91)|United Kingdom (+44)" data-label="Country Phone Code" data-current="United Kingdom (+44)" value="uk">United Kingdom (+44)</button><input type="text" class="wd-store" value="uk"></div>
+</div>
+<div class="footer">Cancel | Submit</div>
+
+<script>
+const COUNTRIES = ['Afghanistan','Åland Islands'];
+for (let i = 0; i < 230; i++) COUNTRIES.push('Country ' + String(i).padStart(3, '0'));
+COUNTRIES.push('Germany','India','United Kingdom','Yemen','Zambia','Zimbabwe');
+window.openCount = 0;
+
+// ---- Workday button-listbox ----
+document.querySelectorAll('button[aria-haspopup=listbox]').forEach(btn => {
+  const store = btn.parentElement.querySelector('.wd-store');
+  const opts = btn.dataset.options === '@countries' ? COUNTRIES : btn.dataset.options.split('|');
+  const setLabel = () => btn.setAttribute('aria-label', btn.dataset.label + ' ' + btn.innerText.trim());
+  setLabel();
+  // Writing the store programmatically does nothing: Workday re-renders it.
+  store.addEventListener('input', () => setTimeout(() => { store.value = btn.value; }, 0));
+  store.addEventListener('change', () => setTimeout(() => { store.value = btn.value; }, 0));
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.wd-list').forEach(n => n.remove());
+    const ul = document.createElement('ul');
+    ul.className = 'wd-list'; ul.setAttribute('role', 'listbox'); ul.id = 'list-' + btn.id;
+    ['Select One', ...opts].forEach((t, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option'); li.id = btn.id + '-opt-' + i; li.textContent = t;
+      if (t === btn.innerText.trim()) li.setAttribute('aria-selected', 'true');
+      li.addEventListener('click', () => {
+        if (t !== 'Select One') { btn.textContent = t; btn.value = 'id-' + i; store.value = 'id-' + i; }
+        setLabel(); ul.remove(); btn.removeAttribute('aria-expanded'); btn.removeAttribute('aria-controls');
+      });
+      ul.appendChild(li);
+    });
+    const r = btn.getBoundingClientRect();
+    ul.style.left = (r.left + scrollX) + 'px'; ul.style.top = (r.bottom + scrollY) + 'px';
+    document.body.appendChild(ul);
+    btn.setAttribute('aria-expanded', 'true'); btn.setAttribute('aria-controls', ul.id);
+    window.openCount++;
+    // Workday scrolls a freshly opened list back to the current value ~120ms later.
+    const cur = [...ul.children].findIndex(li => li.getAttribute('aria-selected') === 'true');
+    setTimeout(() => { if (ul.isConnected) ul.scrollTop = Math.max(0, cur) * 32; }, 120);
+  });
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') document.querySelectorAll('.wd-list, .overlay').forEach(n => n.remove());
+});
+document.addEventListener('mousedown', ev => {
+  if (!ev.target.closest('.wd-list, button[aria-haspopup=listbox]'))
+    document.querySelectorAll('.wd-list').forEach(n => n.remove());
+});
+
+// ---- Workday search prompt ----
+const CATALOG = ['Python (Programming Language)', 'Python IDLE', 'Python Frameworks', 'SQLite',
+                 'PHP (Programming Language)', 'Java (Programming Language)'];
+document.querySelectorAll('[data-automation-id=multiselectInputContainer]').forEach(box => {
+  const input = box.querySelector('input'), pills = box.querySelector('.pills');
+  const catalog = box.dataset.catalog === '1';
+  let results = null;
+  const addPill = t => {
+    if ([...pills.querySelectorAll('[data-automation-id=selectedItem]')].some(p => p.title === t)) return;
+    const li = document.createElement('li');
+    li.innerHTML = '<div role="option" data-automation-id="selectedItem"><p data-automation-id="promptOption"></p></div>';
+    li.firstChild.title = t; li.querySelector('p').textContent = t;
+    pills.appendChild(li);
+  };
+  const close = () => { if (results) { results.remove(); results = null; } };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Tab') { close(); return; }
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const q = input.value.trim();
+    close();
+    if (!catalog) { if (q) addPill(q); input.value = ''; }
+    results = document.createElement('div');
+    results.className = 'results'; results.setAttribute('role', 'listbox');
+    results.setAttribute('data-automation-id', 'activeListContainer');
+    const rows = catalog ? CATALOG.filter(c => q && c.toLowerCase().includes(q.toLowerCase().split(' ')[0])) : [];
+    // The echo row: always present, id "menuItem-" + typed text.
+    const all = catalog ? [...rows.map(t => ['menuItem-REMOTE-' + CATALOG.indexOf(t), t]), ['menuItem-' + q, q]]
+                        : [['menuItem-' + q, q || 'No Items.']];
+    all.forEach(([id, t]) => {
+      const row = document.createElement('div');
+      row.setAttribute('role', 'option'); row.id = id;
+      row.innerHTML = '<div data-automation-id="promptLeafNode"><p data-automation-id="promptOption"></p></div>';
+      row.querySelector('p').textContent = t;
+      row.addEventListener('click', () => addPill(t));
+      results.appendChild(row);
+    });
+    const r = box.getBoundingClientRect();
+    results.style.left = (r.left + scrollX) + 'px'; results.style.top = (r.bottom + scrollY) + 'px';
+    document.body.appendChild(results);
+  });
+});
+
+// ---- Angular Material mat-select ----
+document.querySelectorAll('mat-select').forEach(sel => {
+  const label = sel.getAttribute('aria-labelledby');
+  const val = sel.querySelector('.mat-mdc-select-value-text');
+  const open = () => {
+    document.querySelectorAll('.overlay').forEach(n => n.remove());
+    const pane = document.createElement('div');
+    pane.className = 'overlay cdk-overlay-pane'; pane.setAttribute('role', 'listbox'); pane.id = 'panel-' + sel.id;
+    sel.dataset.options.split('|').forEach((t, i) => {
+      const o = document.createElement('mat-option');
+      o.setAttribute('role', 'option'); o.id = sel.id + '-o' + i; o.textContent = t; o.style.display = 'block';
+      if (t === val.textContent) o.setAttribute('aria-selected', 'true');
+      o.addEventListener('click', () => {
+        val.textContent = t;
+        sel.setAttribute('aria-labelledby', label + ' ' + val.id);
+        pane.remove(); sel.setAttribute('aria-expanded', 'false');
+      });
+      pane.appendChild(o);
+    });
+    const r = sel.getBoundingClientRect();
+    pane.style.left = (r.left + scrollX) + 'px'; pane.style.top = (r.bottom + scrollY) + 'px';
+    document.body.appendChild(pane);
+    sel.setAttribute('aria-expanded', 'true'); sel.setAttribute('aria-controls', pane.id);
+  };
+  sel.addEventListener('click', open);
+  // The floating label sits over the trigger and opens it too.
+  const lab = document.getElementById(label);
+  if (lab.classList.contains('float')) lab.addEventListener('click', open);
+});
+</script>
+</body></html>

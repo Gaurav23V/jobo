@@ -1,0 +1,73 @@
+<!doctype html><meta charset="utf-8"><title>Isolated upload stability regression</title>
+<form id="application"><div id="host"></div></form>
+<script>
+window.setup = function(mode, delay=1200) {
+  window.writes = 0; window.mounted = false;
+  const host = document.getElementById('host');
+  const input = (kind='resume') => { const e=document.createElement('input'); e.type='file'; e.dataset.testid='input-'+kind; e.accept='.pdf'; return e; };
+  const mount = () => { host.replaceChildren(input(),input('cover')); window.mounted=true; };
+  if(mode==='missing') { setTimeout(mount,delay); return; }
+  if(mode==='never') return;
+  mount(); window.mounted=false;
+  if(mode==='sharedidentity') {
+    host.firstChild.dataset.testid='upload'; host.firstChild.id='resume-main';
+    host.lastChild.dataset.testid='upload'; host.lastChild.id='identity-document';
+    setTimeout(()=>host.firstChild.remove(),delay);
+  }
+  if(mode==='externalform' || mode==='externalstable') {
+    const a=document.createElement('form'), b=document.createElement('form');
+    a.id='applicationA'; b.id='applicationB'; document.body.append(a,b);
+    host.firstChild.setAttribute('form','applicationA');
+    if(mode==='externalform') setTimeout(()=>host.firstChild.setAttribute('form','applicationB'),delay);
+  }
+  // Mapleton shape: a display:none mobile copy of the WHOLE form comes first,
+  // so label[for=resume_field] (both of them) resolves to the hidden input.
+  if(mode==='responsivetwin' || mode==='responsivedrift') {
+    const slot = () => { const l=document.createElement('label'); l.htmlFor='resume_field'; l.textContent='Upload Resume *';
+      const e=document.createElement('input'); e.type='file'; e.id=e.name='resume_field'; e.required=true;
+      e.accept='.doc, .docx, .pdf, .png, .jpeg, .jpg'; return [l,e]; };
+    const mobile=document.createElement('div'); mobile.className='mobile-only'; mobile.style.display='none';
+    const copy=document.createElement('form'); copy.id='dynamic-form'; copy.append(...slot()); mobile.append(copy);
+    const desktop=document.getElementById('application'); desktop.id='dynamic-form';
+    desktop.before(mobile); host.replaceChildren(...slot());
+    window.twin = () => ({hidden: Array.from(copy.querySelector('input').files, f=>f.name),
+                          visible: Array.from(host.querySelector('input').files, f=>f.name)});
+    if(mode==='responsivedrift') {
+      const b=document.createElement('form'); b.id='applicationB'; document.body.append(b);
+      setTimeout(()=>host.querySelector('input').setAttribute('form','applicationB'),delay);
+    }
+  }
+  if(mode==='preexisting' || mode==='counterfeit') {
+    const substitute=()=>{ const dt=new DataTransfer(); dt.items.add(new File(
+      [mode==='preexisting' ? 'wrong-content' : 'x'.repeat(36)], 'probe-resume.pdf'));
+      host.firstChild.files=dt.files; };
+    if(mode==='preexisting') substitute();
+    else document.addEventListener('change',e=>{if(e.target===host.firstChild) setTimeout(substitute,100);});
+  }
+  if(mode==='hidden') host.firstChild.hidden=true;
+  if(mode==='shadow') { host.replaceChildren(); host.attachShadow({mode:'open'}).append(input()); }
+  if(mode==='iframe') { host.innerHTML='<iframe></iframe>'; host.firstChild.contentDocument.body.append(input()); }
+  if(['late','retain','ambiguous','wrongslot','formreplace'].includes(mode)) setTimeout(()=>{
+    const old=host.firstChild, files=old.files;
+    if(mode==='formreplace') { const form=document.getElementById('application'); form.replaceWith(form.cloneNode(true)); window.mounted=true; return; }
+    mount();
+    if(mode==='retain') host.firstChild.files=files;
+    if(mode==='ambiguous') host.append(input());
+    if(mode==='wrongslot') { host.firstChild.remove(); host.firstChild.files=files; }
+  },delay);
+  if(mode==='clearalways') document.addEventListener('change',e=>{
+    if(e.target.type==='file') setTimeout(()=>{ e.target.value=''; },100);
+  });
+};
+window.state = function() {
+  const out=[];
+  function walk(root) {
+    for(const el of root.querySelectorAll('*')) {
+      if(el.type==='file') out.push({slot:el.dataset.testid,files:Array.from(el.files).map(f=>f.name)});
+      if(el.shadowRoot) walk(el.shadowRoot);
+      if(el.tagName==='IFRAME') walk(el.contentDocument);
+    }
+  }
+  walk(document); return {mounted:window.mounted,inputs:out};
+};
+</script>

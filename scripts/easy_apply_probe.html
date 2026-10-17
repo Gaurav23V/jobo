@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Backend Developer | Acme Labs | LinkedIn</title>
+<!--
+  Local replica of LinkedIn's Easy Apply modal (TODO item 18), modelled on the
+  real one captured read-only on 2026-10-12 (resume_guard.py has the shape):
+    * <dialog data-testid="dialog" aria-labelledby="dialog-header"> opened
+      with showModal(), heading "Apply to <Company>";
+    * resume step = <fieldset role="radiogroup"> of saved-resume cards, each a
+      div[role=button] card plus <div aria-label=NAME><input type=radio
+      aria-label=NAME name=radio-group-..><label for></label></div>; the first
+      saved card, "resume.pdf", is PRE-SELECTED;
+    * "Upload resume" is a plain <button>; there is NO <input type=file> in
+      the document: the click creates a detached input and opens the file
+      chooser, like LinkedIn;
+    * the upload is POSTed to the server, then listed as a new card at the top.
+  Query parameters:
+    steps=1     single page: contact + resume + "Submit application" (the shape
+                of the 13 bad sends on 2026-10-11)
+    steps=4     contact -> resume -> questions -> review (review shows the
+                chosen resume as text, no radios) -> "Submit application"
+    autoselect=1  a fresh upload becomes the selected card (0: the old
+                pre-selected card stays selected)
+  Server API: POST /api/upload (multipart "file"), POST /api/submit (JSON).
+-->
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  header { height: 52px; background: #fff; border-bottom: 1px solid #ddd; }
+  .job { padding: 24px; }
+  dialog { width: 560px; max-height: 80vh; padding: 0; border: 1px solid #999; }
+  .body { padding: 16px; max-height: 60vh; overflow: auto; }
+  .card { display: flex; align-items: center; justify-content: space-between;
+          border: 1px solid #ccc; margin: 6px 0; padding: 6px 8px; width: 33.6rem; }
+  .card [role=button] { flex: 1; cursor: pointer; }
+  .card input[type=radio] { width: 18px; height: 18px; }
+  footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px;
+           border-top: 1px solid #ddd; }
+  .hidden { display: none; }
+  .sent { padding: 24px; font-size: 20px; }
+</style>
+</head>
+<body>
+<header>LinkedIn</header>
+<div class="job">
+  <h1>Backend Developer</h1>
+  <p>Acme Labs - Springfield (Remote)</p>
+  <button id="easy" aria-label="Easy Apply to this job">Easy Apply</button>
+</div>
+
+<dialog data-testid="dialog" aria-labelledby="dialog-header" id="modal">
+  <div style="padding: 12px 16px; display: flex; justify-content: space-between">
+    <h2 id="dialog-header">Apply to Acme Labs</h2>
+    <button type="button" aria-label="Dismiss" id="dismiss">x</button>
+  </div>
+  <div class="body">
+    <section data-step="contact">
+      <h3>Contact info</h3>
+      <label>Email* <input type="email" value="candidate@example.com"></label><br>
+      <label>Phone* <input type="tel" id="phone" value="9000000000"></label>
+    </section>
+    <section data-step="resume">
+      <h3>Resume</h3>
+      <p>Select or upload a resume in DOC, DOCX, or PDF format that is less than 2MB</p>
+      <fieldset role="radiogroup" aria-describedby="error-message-r1" style="border: 0; padding: 0">
+        <div><div id="easyApplyUploadedResumeRef"></div><div id="cards"></div></div>
+      </fieldset>
+      <div><button type="button" id="upload"><span><span>Upload resume</span></span></button></div>
+      <div role="alert" id="upload-error"></div>
+    </section>
+    <section data-step="questions">
+      <h3>Additional questions</h3>
+      <label>Years of experience with Python* <input type="text" id="yoe" value="1.5"></label>
+    </section>
+    <section data-step="review">
+      <h3>Review your application</h3>
+      <div id="review"></div>
+    </section>
+  </div>
+  <footer>
+    <button type="button" id="back">Back</button>
+    <button type="button" id="next">Next</button>
+    <button type="button" id="reviewbtn">Review</button>
+    <button type="button" id="submit"><span><span>Submit application</span></span></button>
+  </footer>
+</dialog>
+<div id="done" class="sent hidden">Your application was sent to Acme Labs</div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const STEPS = q.get('steps') === '4' ? ['contact', 'resume', 'questions', 'review'] : ['contact+resume'];
+const AUTOSELECT = q.get('autoselect') !== '0';
+const SAVED = [
+  ['resume.pdf', '10/11/2026'], ['cover.pdf', '8/25/2026'],
+  ['Alex_Example_Resume.pdf', '8/25/2026'], ['Alex_Example_Resume.pdf', '7/15/2026'],
+  ['Resume.pdf', '12/17/2025'], ['Alex_Example_Resume_ML.pdf', '7/4/2025'],
+];
+let uid = 0, step = 0;
+const uploaded = {};   // name -> server id
+window.__state = { uploads: 0, chooserOpens: 0, submits: 0 };
+
+function cardHtml(name, date) {
+  const id = 'r_' + (uid++);
+  const wrap = document.createElement('div');
+  wrap.setAttribute('data-display-contents', 'true');
+  wrap.innerHTML =
+    '<div class="card"><div role="button" tabindex="0"><div><p>PDF</p></div>' +
+    '<div><p><span></span></p><p></p></div></div>' +
+    '<a tabindex="0" href="#" aria-label="Download">dl</a>' +
+    '<div><input type="radio" tabindex="0" name="radio-group-r1"><label></label></div></div>';
+  wrap.querySelector('span').textContent = name;
+  wrap.querySelectorAll('p')[2].textContent = date;
+  const holder = wrap.querySelector('input').parentElement;
+  holder.setAttribute('aria-label', name);
+  const radio = wrap.querySelector('input');
+  radio.id = id;
+  radio.setAttribute('aria-label', name);
+  wrap.querySelector('label').htmlFor = id;
+  wrap.querySelector('[role=button]').addEventListener('click', () => { radio.checked = true; });
+  return wrap;
+}
+
+function renderSaved() {
+  const box = document.getElementById('cards');
+  SAVED.forEach(([n, d]) => box.appendChild(cardHtml(n, d)));
+  box.querySelector('input').checked = true;   // LinkedIn pre-selects a saved resume
+}
+
+function selectedName() {
+  const r = document.querySelector('#modal fieldset input[type=radio]:checked');
+  return r ? r.getAttribute('aria-label') : null;
+}
+
+function show() {
+  const name = STEPS[step];
+  document.querySelectorAll('section[data-step]').forEach(s => {
+    const on = name === 'contact+resume' ? ['contact', 'resume'].includes(s.dataset.step) : s.dataset.step === name;
+    s.classList.toggle('hidden', !on);
+  });
+  const last = step === STEPS.length - 1;
+  document.getElementById('back').classList.toggle('hidden', step === 0);
+  document.getElementById('next').classList.toggle('hidden', last || STEPS[step + 1] === 'review');
+  document.getElementById('reviewbtn').classList.toggle('hidden', last || STEPS[step + 1] !== 'review');
+  document.getElementById('submit').classList.toggle('hidden', !last);
+  if (name === 'review') {
+    const r = document.getElementById('review');
+    r.innerHTML = '<h4>Contact info</h4><p>candidate@example.com</p><h4>Resume</h4><p></p>';
+    r.querySelector('p:last-child').textContent = selectedName() || '(none)';
+  }
+}
+
+document.getElementById('easy').addEventListener('click', () => {
+  document.getElementById('modal').showModal();
+  show();
+});
+document.getElementById('dismiss').addEventListener('click', () => document.getElementById('modal').close());
+document.getElementById('next').addEventListener('click', () => { step++; show(); });
+document.getElementById('reviewbtn').addEventListener('click', () => { step++; show(); });
+document.getElementById('back').addEventListener('click', () => { step--; show(); });
+
+document.getElementById('upload').addEventListener('click', () => {
+  // No file input lives in the DOM: a detached one opens the chooser.
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.pdf,.doc,.docx';
+  input.addEventListener('change', async () => {
+    const f = input.files[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('file', f, f.name);
+    const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+    if (!resp.ok) { document.getElementById('upload-error').textContent = 'Upload failed'; return; }
+    const { id } = await resp.json();
+    uploaded[f.name] = id;
+    window.__state.uploads++;
+    const card = cardHtml(f.name, 'Just now');
+    const ref = document.getElementById('easyApplyUploadedResumeRef');
+    ref.parentElement.insertBefore(card, ref.nextSibling);
+    if (AUTOSELECT) card.querySelector('input').checked = true;
+  });
+  window.__state.chooserOpens++;
+  input.click();
+});
+
+document.getElementById('submit').addEventListener('click', async () => {
+  const name = selectedName();
+  window.__state.submits++;
+  await fetch('/api/submit', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resume: name, upload_id: uploaded[name] || null }),
+  });
+  document.getElementById('modal').close();
+  document.getElementById('done').classList.remove('hidden');
+});
+
+renderSaved();
+</script>
+</body>
+</html>

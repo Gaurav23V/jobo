@@ -1,0 +1,56 @@
+"""Query jobs eligible for Module 4 submission."""
+
+from __future__ import annotations
+
+from sqlalchemy.orm import Session
+
+from db.models import JobModel
+from policy import employer_blocklist, paused_sites
+
+
+def list_jobs_to_apply(
+    session: Session,
+    *,
+    limit: int | None = None,
+    force: bool = False,
+    job_id: int | None = None,
+) -> list[JobModel]:
+    """should_apply=true rows without a successful submission (unless force).
+
+    Rows where applied=true are skipped; rows with module4_last_status set but
+    applied still false are retried (transient failures).
+
+    job_id: restrict to a single job — used for one-off testing without
+    pulling from the full apply backlog.
+
+    Blocked employers (policy.employer_blocklist) are removed unconditionally,
+    including under --force and --job-id. The blocklist is a standing user
+    preference, not a recoverable failure state.
+    """
+    q = (
+        session.query(JobModel)
+        .filter(JobModel.should_apply.is_(True))
+        .filter(JobModel.applied.isnot(True))
+        # Dead listings are terminal and send nothing. They used to be hidden
+        # by applied=1 (wrongly, see module4/persist.mark_closed); this is the
+        # explicit filter that replaces that accident.
+        .filter(JobModel.module4_closed_at.is_(None))
+        .filter(JobModel.module2_enriched_at.isnot(None))
+        .order_by(JobModel.module3_fit_score.desc(), JobModel.id)
+    )
+    if job_id is not None:
+        q = q.filter(JobModel.id == job_id)
+    # Blocklist filtering happens BEFORE `limit` so a blocked job cannot eat a
+    # slot in a capped run (JOBO_APPLY_MAX_JOBS).
+    rows = q.all()
+    # Jobs parked on a paused ATS wait until that site leaves
+    # policy/paused_sites.PAUSED_SITES; an explicit --job-id or --force still
+    # reaches them, for testing a fix.
+    if job_id is None and not force:
+        rows = [r for r in rows if not paused_sites.still_paused(r.module4_last_status)]
+    allowed, blocked = employer_blocklist.partition(rows)
+    if blocked:
+        employer_blocklist.log_blocked(blocked, "apply")
+    if limit:
+        allowed = allowed[:limit]
+    return allowed

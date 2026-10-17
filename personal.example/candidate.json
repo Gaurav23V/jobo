@@ -1,0 +1,55 @@
+{
+  "full_name": "Alex Example",
+  "first_name": "Alex",
+  "email": "alex.example@example.com",
+  "phone": "+1 555 0100",
+  "linkedin_url": "https://www.linkedin.com/company/example",
+  "github_url": "https://github.com/example",
+  "website_url": "https://alex.example.com/",
+  "location": "Springfield, USA",
+  "upload_slug": "Alex_Example",
+  "answer_chains": {
+    "school": {
+      "triggers": [
+        "liit springfield",
+        "lakeside institute of information technology springfield"
+      ],
+      "options": [
+        "Lakeside Institute of Information Technology Springfield",
+        "Lakeside Institute of Information Technology, Springfield",
+        "LIIT Springfield",
+        "Lakeside Institute of Information Technology",
+        "LIIT"
+      ]
+    },
+    "city": {
+      "triggers": [
+        "springfield city",
+        "springfield",
+        "springfield city, illinois",
+        "springfield, illinois"
+      ],
+      "options": [
+        "Springfield",
+        "Springfield City",
+        "Springfield, Illinois, India",
+        "Springfield City, Illinois, India",
+        "Springfield, Illinois",
+        "Springfield City, Illinois",
+        "Springfield Metro",
+        "Illinois"
+      ]
+    }
+  },
+  "blocked_employers": [
+    "Globex",
+    "Initech",
+    "Umbrella"
+  ],
+  "blocked_domains": [
+    "globex.example",
+    "initech.example",
+    "umbrella.example",
+    "jobboard.example"
+  ]
+}

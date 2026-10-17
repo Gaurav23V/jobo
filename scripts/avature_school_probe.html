@@ -1,0 +1,84 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Avature education probe</title>
+<!--
+Local replica of Wingtip's Avature "Education History" block (careers.wingtip.com,
+measured live 2026-10-03), used by scripts/test_avature_school.py.
+
+What is faithful to the real page:
+  * School is select2 4.0.12 over an EMPTY <select>, with an ajax catalogue
+    (minimumInputLength 0, delay 1000 ms). Real endpoint:
+    POST /jobs/_wizardPortalDatasetOptionsSearchApi. Here a local transport
+    answers from a fixed list, so the test needs no network.
+  * select2 lives on a PRIVATE jQuery copy (window.avajQuery, 3.7.1) while
+    window.jQuery is a different copy with no select2 - exactly Wingtip's setup.
+  * Dates are native <input type="month">, which only accept "yyyy-mm".
+  * A hidden template row (data-samplerow, ids "*-sample") precedes the real row.
+  * The catalogue has "(School not listed)" and also "Company Not Listed"
+    (Wingtip's school search for "not listed" returns both).
+-->
+<script src="fixtures/vendor/jquery-3.7.1.min.js"></script>
+<script>window.__plainJQ = window.jQuery;</script>
+<script src="fixtures/vendor/jquery-3.7.1.min.js"></script>
+<script src="fixtures/vendor/select2-4.0.12.full.min.js"></script>
+<script>
+  // Hand the select2-carrying copy to avajQuery and restore the plain one.
+  window.avajQuery = window.jQuery.noConflict(true);
+</script>
+</head>
+<body>
+<form id="wiz" onsubmit="return false">
+  <div data-samplerow="1" style="display:none">
+    <div class="fieldSpec"><label for="6363-8-sample">School *</label>
+      <select id="6363-8-sample" name="6363-8-sample" class="s2remote"><option></option></select></div>
+    <label for="6363-36-sample">Start Date</label><input type="month" id="6363-36-sample">
+    <label for="6363-3-sample">Graduation Date *</label><input type="month" id="6363-3-sample">
+  </div>
+  <div class="row">
+    <div class="fieldSpec"><label for="6363-8-0" id="6363-8-0-label">School<span> *</span></label>
+      <select id="6363-8-0" name="6363-8-0" class="s2remote" required><option></option></select></div>
+    <label for="6363-36-0">Start Date</label>
+    <input type="month" id="6363-36-0" name="6363-36-0">
+    <label for="6363-3-0">Graduation Date/Anticipated Graduation Date *</label>
+    <input type="month" id="6363-3-0" name="6363-3-0" required>
+    <div class="fieldSpec"><label for="major">Major (remote, no escape option)</label>
+      <select id="major" name="major" class="s2remote-noescape"><option></option></select></div>
+  </div>
+  <button id="save" type="submit">Continue</button>
+</form>
+<script>
+const SCHOOLS = [
+  {id: '4932', text: '(School not listed)'},
+  {id: '9001', text: 'Company Not Listed'},
+  {id: '2735', text: 'Aachen Fachhochschule'},
+  {id: '3101', text: 'Lakeside Institute of Information Technology, Allahabad'},
+  {id: '3102', text: 'Lakeside Institute of Information Technology & Management'},
+  {id: '4289', text: 'Malaviya National Institute of Technology, Riverton'},
+  {id: '5001', text: 'North Daspringfield State University'},
+  {id: '5002', text: 'University of Illinois'},
+];
+const MAJORS = [{id: 'm1', text: 'Physics'}, {id: 'm2', text: 'Economics'}];
+window.searchLog = [];
+function transportFor(list) {
+  return function (params, success, failure) {
+    const term = ((params.data && params.data.term) || '').toLowerCase();
+    window.searchLog.push(term);
+    const t = setTimeout(() => success({results: list.filter(r => r.text.toLowerCase().includes(term))}), 150);
+    return {abort: () => clearTimeout(t)};
+  };
+}
+const $a = window.avajQuery;
+$a('.s2remote').each(function () {
+  $a(this).select2({placeholder: 'Select an option', allowClear: true, minimumInputLength: 0,
+    ajax: {delay: 1000, transport: transportFor(SCHOOLS), data: p => ({term: p.term || ''})}});
+});
+$a('.s2remote-noescape').select2({placeholder: 'Select an option', minimumInputLength: 0,
+  ajax: {delay: 300, transport: transportFor(MAJORS), data: p => ({term: p.term || ''})}});
+// The wizard's own validity check, modelled on Avature's isValid(): a required
+// select needs a real option id, a month input needs a yyyy-mm value.
+window.fieldValid = id => {
+  const e = document.getElementById(id);
+  if (e.tagName === 'SELECT') return !!e.value;
+  return /^\d{4}-\d{2}$/.test(e.value) && e.checkValidity();
+};
+</script>
+</body></html>

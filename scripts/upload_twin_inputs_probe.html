@@ -1,0 +1,116 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Twin file inputs probe (SmartRecruiters oneclick + Keka)</title>
+<!--
+Replica of two live shapes measured on 2026-10-04 (scratch Chromium, real pages):
+
+1. SmartRecruiters oneclick (Fieldfare 1375, jobs.smartrecruiters.com/oneclick-ui/...):
+   two <spl-dropzone> web components, each with an OPEN shadow root holding a
+   byte-identical <input type=file id="file-input" accept="..."> . The only
+   difference is outside the shadow root: the host's data-test
+   (apply-with-resume-container vs resume-upload) and the section title above it
+   (<spl-typography-title> "Easy Apply" vs "Resume"). On change the widget takes
+   the File into its own state, EMPTIES the input (files.length 0 within ~15 ms)
+   and renders a "resume.pdf" chip inside its shadow root. The live page also has
+   ~1,800 other shadow roots (flag icons) before the Resume section.
+2. Keka (Cronus 1380/1396, cronus.keka.com/careers/applyjob/100001): a visible
+   input#resume-upload.resume-upload plus a 0x0 twin .resume-upload inside
+   a.resume-upload-link. Both feed the same parser.
+
+?nochip=1 : the SR widget clears its input but never shows the file (a failed
+            upload); the uploader must NOT report success.
+?keka=1   : render the Keka shape instead of the SR one.
+-->
+<body>
+<main id="app"></main>
+<script>
+const params = new URLSearchParams(location.search);
+window.__uploads = {easy: 0, resume: 0, keka_visible: 0, keka_hidden: 0};
+window.__chips = {easy: [], resume: []};
+
+class SplDropzone extends HTMLElement {
+  connectedCallback() {
+    if (this.shadowRoot) return;
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = `
+      <div class=" c-spl-dropzone-wrapper c-spl-dropzone " tabindex="0">
+        <label for="file-input"><span class="c-spl-dropzone-label c-spl-dropzone-label-browse">Choose a file</span>
+        <span class="c-spl-dropzone-label">or drop it here</span></label>
+        <input tabindex="-1" type="file" id="file-input" accept=".doc, .dot, .rmr, .rsm, .resume, .oxps, .pdf, .rtf, .docx, .txt, .jpg, .png">
+      </div>
+      <div class="file-list"></div>`;
+    const input = root.querySelector('input');
+    const zone = this.dataset.test === 'resume-upload' ? 'resume' : 'easy';
+    input.addEventListener('change', () => {
+      const files = [...input.files];
+      if (!files.length) return;
+      window.__uploads[zone] += 1;
+      setTimeout(() => {
+        input.value = '';  // the widget keeps the File, not the input
+        if (params.get('nochip')) return;
+        // Live: the Easy Apply zone hides its own list (hidefilelist), parses
+        // the resume and drops it into the Resume section's list instead.
+        const shownIn = zone === 'easy' ? document.querySelector('spl-dropzone[data-test=resume-upload]') : this;
+        for (const f of files) {
+          window.__chips[zone].push(f.name);
+          const row = document.createElement('div');
+          row.innerHTML = '<span class="file-name"></span><button aria-label="delete">x</button>';
+          row.querySelector('.file-name').textContent = f.name;
+          shownIn.shadowRoot.querySelector('.file-list').append(row);
+        }
+      }, 15);
+    });
+  }
+}
+class FlagIcon extends HTMLElement {
+  connectedCallback() {
+    if (!this.shadowRoot) this.attachShadow({mode: 'open'}).innerHTML = '<span>' + this.getAttribute('c') + '</span>';
+  }
+}
+customElements.define('spl-dropzone', SplDropzone);
+customElements.define('spl-flag', FlagIcon);
+
+function section(title, inner, dataTest) {
+  return `<div class="form-section" data-test="${dataTest}-container">
+    <spl-typography-title data-test="section-title" variant="lg"> ${title} </spl-typography-title>
+    ${inner}</div>`;
+}
+
+if (params.get('keka')) {
+  document.getElementById('app').innerHTML = `
+    <form id="jobApplicationForm"><h3>Apply for this job</h3>
+      <div id="resume-droppable" class="input-container mb-3">
+        <div class="resume-upload-container">
+          <input type="file" class="resume-upload" id="resume-upload" data-field-identifier="resume" container="resumes" name="" placeholder="" style="width:600px;height:80px">
+        </div>
+        <div class="resume-upload-button-container p-3 rounded"><div class="resume-upload-button w-100">
+          <a class="resume-upload-link">upload<input type="file" class="resume-upload" data-field-identifier="resume" container="resumes" name="" placeholder="" style="display:none"></a>
+        </div></div>
+      </div>
+      <div id="chip"></div>
+    </form>`;
+  for (const [sel, key] of [['#resume-upload', 'keka_visible'], ['a.resume-upload-link input', 'keka_hidden']]) {
+    const el = document.querySelector(sel);
+    el.addEventListener('change', () => {
+      if (!el.files.length) return;
+      window.__uploads[key] += 1;
+      document.getElementById('chip').textContent = el.files[0].name;
+    });
+  }
+} else {
+  const flags = Array.from({length: 1500}, (_, i) => `<spl-flag c="f${i}"></spl-flag>`).join('');
+  document.getElementById('app').innerHTML = `
+    <oc-oneclick-form>
+      <oc-easy-apply>${section('Easy Apply',
+        `<oc-apply-with-resume class="spl-w-full"><spl-form-field><spl-dropzone data-test="apply-with-resume-container" hidefilelist="" label=""></spl-dropzone></spl-form-field></oc-apply-with-resume>`,
+        'easy-apply')}</oc-easy-apply>
+      <oc-personal-information>${section('Personal information', `<div class="phone">${flags}</div>`, 'personal-information')}</oc-personal-information>
+      <oc-resume-upload>${section('Resume',
+        `<spl-form-field><spl-dropzone data-test="resume-upload" label=""></spl-dropzone></spl-form-field>`,
+        'resume-upload')}</oc-resume-upload>
+    </oc-oneclick-form>`;
+}
+
+window.__state = () => JSON.stringify({uploads: window.__uploads, chips: window.__chips});
+</script>
+</body>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Avature register replica (Wingtip / Southgate shapes)</title>
+<!--
+  Local replica of the two Avature shapes that ate Wingtip 1318's and Southgate 1419's
+  step budgets on 2026-10-03 (markup copied from careers.wingtip.com and
+  southgatecareers.com, scripts replaced by a few lines):
+
+  1. ApplicationMethods: "First time here?  From Device". The resume input and
+     that step's own Continue (#uploadFileResume) sit in a fieldset that is
+     display:none until the "From Device" toggle is clicked.
+  2. Register: the required consent box has an EMPTY <label for>; its question
+     is the fieldset <legend> ("I Acknowledge *" on Southgate, "I have read and
+     agree to the terms of Wingtip's Privacy Policy *" on Wingtip).
+  Nothing here submits. window.__state() reports what was clicked.
+-->
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .methodButton { display: inline-block; padding: 12px 20px; border: 1px solid #333; cursor: pointer; }
+  fieldset { margin: 12px 0; }
+</style>
+</head>
+<body>
+<h2>Software Engineer I</h2>
+
+<form id="manualRegisterMethodsForm" class="form form--methods" onsubmit="return false">
+  <h3>First time here?</h3>
+  <a id="methodButton--file" class="uploadResumeTriggerFile methodButton methodButton--file"
+     role="button" tabindex="0" data-registermethod="file">From Device</a>
+  <a id="methodButton--paste" class="methodButton" role="button" tabindex="0">Copy &amp; Paste</a>
+  <fieldset id="methodButton--fileFieldSetContainer" class="manualRegisterMethodExtra Section" style="display: none">
+    <div id="methodButton--fileFieldSpec" class="fieldSpec">
+      <label class="requiredField" for="resumeFile">From Device<span aria-hidden="true"> *</span></label>
+      <div class="fieldContainer">
+        <input id="resumeFile" type="file" name="resumeFile" aria-required="true"
+               accept=".pdf,.doc,.docx,.txt" style="display: none;">
+        <div class="selectedFile"><span id="fileNameContainer">No file selected</span></div>
+      </div>
+    </div>
+    <div id="uploadFileResumeContainer" class="fieldSpec button-bar">
+      <button id="uploadFileResume" class="button button--primary" type="button">Continue</button>
+    </div>
+  </fieldset>
+</form>
+
+<form id="registerForm" onsubmit="return false">
+  <div class="fieldSpec"><label for="7057">First Name *</label><input id="7057" name="7057" required></div>
+  <div class="fieldSpec"><label for="7065pw">Password *</label><input id="7065pw" type="password" required></div>
+
+  <!-- Wingtip's affinity-group question: several boxes in one fieldset, each with its own label. -->
+  <div class="fieldSpec" id="fieldSpecContainer6383">
+    <fieldset>
+      <legend id="6383-label">Are you interested in any of our affinity groups?</legend>
+      <label><input type="checkbox" id="6383_1" name="6383[]" value="1"> Asian at Wingtip</label>
+      <label><input type="checkbox" id="6383_2" name="6383[]" value="2"> Women at Wingtip</label>
+    </fieldset>
+  </div>
+
+  <!-- Two unlabelled boxes in one fieldset: the legend names neither of them. -->
+  <div class="fieldSpec" id="fieldSpecContainer9000">
+    <fieldset>
+      <legend id="9000-label">Pick your shifts</legend>
+      <div class="opt"><input type="checkbox" id="9000_a" name="9000[]" value="a"></div>
+      <div class="opt"><input type="checkbox" id="9000_b" name="9000[]" value="b"></div>
+    </fieldset>
+  </div>
+
+  <!-- Avature AcceptCheckboxField, verbatim shape from Southgate (Wingtip identical). -->
+  <div class="fieldSpec AcceptCheckboxField isRequired" id="fieldSpecContainer7065">
+    <fieldset>
+      <legend class="WizardFieldLabel" id="7065-label">I Acknowledge<span aria-hidden="true" class="labelRequiredIcon"> *</span></legend>
+      <div class="description WizardFieldDescription" id="7065-description">Providing your job application
+        data on this site is voluntary. For further information please refer to the full privacy notice
+        available <a href="#privacy" target="_blank" rel="noreferrer noopener">here</a>.</div>
+      <div class="AcceptCheckboxFieldContainer">
+        <label for="7065" class="tc_formSublabel WizardFieldInput"></label>
+        <input id="7065" type="checkbox" tabindex="0" value="1" name="7065"
+               aria-describedby="7065-description" data-required="true" required="true" aria-required="true">
+        <input id="7065_unselectedIndicator" type="hidden" value="0" name="7065_unselectedIndicator">
+      </div>
+    </fieldset>
+  </div>
+  <button id="7066-next" type="button">Continue</button>
+  <button id="7066-cancel" type="button">Cancel</button>
+</form>
+
+<script>
+  const st = {toggleClicks: 0, uploadContinueClicks: 0, registerContinueClicks: 0};
+  window.__state = () => ({...st,
+    sectionShown: getComputedStyle(document.getElementById('methodButton--fileFieldSetContainer')).display !== 'none',
+    files: [...document.getElementById('resumeFile').files].map(f => f.name),
+    consent: document.getElementById('7065').checked});
+  document.getElementById('methodButton--file').addEventListener('click', () => {
+    st.toggleClicks++;
+    document.getElementById('methodButton--fileFieldSetContainer').style.display = 'block';
+    // Avature opens the native picker from here; without a user gesture the
+    // browser ignores it (as on the real site).
+    document.getElementById('resumeFile').click();
+  });
+  document.getElementById('resumeFile').addEventListener('change', e => {
+    document.getElementById('fileNameContainer').textContent = e.target.files[0] ? e.target.files[0].name : 'No file selected';
+  });
+  document.getElementById('uploadFileResume').addEventListener('click', () => st.uploadContinueClicks++);
+  document.getElementById('7066-next').addEventListener('click', () => st.registerContinueClicks++);
+</script>
+</body>
+</html>

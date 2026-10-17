@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- Southgate/Avature "Work Experience" step for a RETURNING account, as it
+     loaded for job 1528 on 2026-10-14 (field names, order and saved values
+     copied from the live accessibility tree, session 20261014_112426_4d9d85).
+     Every required box is already filled from the saved profile; the agent
+     rewrote the Work History anyway and ran out of steps. Nothing here
+     submits: Continue only counts clicks. -->
+<html><head><meta charset="utf-8"><title>Jr. Software / Platform Engineer II</title></head>
+<body>
+<h2>Jr. Software / Platform Engineer II</h2>
+<form id="wizard" onsubmit="return false">
+  <fieldset><legend>Work Experience</legend>
+    <label for="5051">Resume</label>
+    <select id="5051" name="resumeSelect">
+      <option value="new" selected>Upload a new file</option>
+      <optgroup label="Previously saved files">
+        <option value="old1">alex_example_resume.pdf - 05 Mar 2026</option>
+      </optgroup>
+    </select>
+    <input type="file" id="5052" name="file_5052" accept=".doc,.docx,.pdf,.txt">
+    <label for="5053">Current Position Title</label>
+    <input type="text" id="5053" name="currentTitle" required value="Software Engineering Intern">
+    <label for="5054">Current Employer</label>
+    <input type="text" id="5054" name="currentEmployer" required value="Sample Labs">
+  </fieldset>
+
+  <fieldset><legend>Work History</legend>
+    <div class="entry" data-entry="1">
+      <label for="wh1_employer">Employer</label>
+      <input type="text" id="wh1_employer" required value="Sample Labs">
+      <label for="wh1_title">Position Title</label>
+      <input type="text" id="wh1_title" required value="Software Engineering Intern">
+      <label for="wh1_country">Country</label>
+      <select id="wh1_country" required><option value="">Select an option</option><option value="IN" selected>India</option><option value="US">United States</option></select>
+      <label for="wh1_current">Current position?</label>
+      <select id="wh1_current"><option value="">Select an option</option><option value="1" selected>Yes</option><option value="0">No</option></select>
+      <label for="wh1_from_m">Month</label><input type="number" id="wh1_from_m" value="7">
+      <label for="wh1_from_y">Year</label><input type="number" id="wh1_from_y" value="2025">
+      <label for="wh1_roles">Roles &amp; Responsibilities</label>
+      <textarea id="wh1_roles">springfield, illinois</textarea>
+      <button type="button" class="remove">REMOVE</button>
+    </div>
+    <div class="entry" data-entry="2">
+      <label for="wh2_employer">Employer</label>
+      <input type="text" id="wh2_employer" required value="Test Systems">
+      <label for="wh2_title">Position Title</label>
+      <input type="text" id="wh2_title" required value="Software Intern">
+      <label for="wh2_country">Country</label>
+      <select id="wh2_country" required><option value="">Select an option</option><option value="IN" selected>India</option><option value="US">United States</option></select>
+      <label for="wh2_current">Current position?</label>
+      <select id="wh2_current"><option value="">Select an option</option><option value="1">Yes</option><option value="0" selected>No</option></select>
+      <label for="wh2_from_m">Month</label><input type="number" id="wh2_from_m" value="6">
+      <label for="wh2_from_y">Year</label><input type="number" id="wh2_from_y" value="2024">
+      <label for="wh2_to_m">Month</label><input type="number" id="wh2_to_m" value="8">
+      <label for="wh2_to_y">Year</label><input type="number" id="wh2_to_y" value="2024">
+      <label for="wh2_roles">Roles &amp; Responsibilities</label>
+      <textarea id="wh2_roles">riverton, illinois</textarea>
+      <button type="button" class="remove">REMOVE</button>
+    </div>
+    <button type="button" id="addWork">ADD ANOTHER</button>
+  </fieldset>
+
+  <fieldset><legend>Education History</legend>
+    <label for="5060">Highest Degree/Diploma Obtained</label>
+    <select id="5060"><option value="">Select an option</option><option value="hs">High School Graduate or Equivalent</option><option value="ba" selected>Bachelor's Degree</option><option value="ma">Master's Degree</option></select>
+    <label for="ed1_school">School</label>
+    <input type="text" id="ed1_school" required value="Lakeside Institute of Information Technology Springfield">
+    <label for="ed1_degree">Degree</label>
+    <select id="ed1_degree"><option value="">Select an option</option><option value="ba" selected>Bachelor's Degree</option><option value="ma">Master's Degree</option></select>
+    <label for="ed1_major">Major</label>
+    <input type="text" id="ed1_major" value="Computer Science and Engineering">
+    <label for="ed1_country">Country</label>
+    <select id="ed1_country" required><option value="">Select an option</option><option value="IN" selected>India</option></select>
+    <label for="ed1_attending">Still Attending?</label>
+    <select id="ed1_attending"><option value="">Select an option</option><option value="1" selected>Yes</option><option value="0">No</option></select>
+  </fieldset>
+
+  <fieldset><legend>Skills</legend>
+    <label for="5070">Area of Expertise</label>
+    <select id="5070"><option value="">Select an option</option><option value="fin">Finance</option><option value="tech" selected>Technology</option></select>
+  </fieldset>
+
+  <button type="button" id="continue">Continue</button>
+  <button type="button" id="previous">Previous</button>
+  <button type="button" id="partialSave">Partial Save</button>
+</form>
+<script>
+  const st = {continueClicks: 0, addClicks: 0, removeClicks: 0};
+  document.getElementById('continue').addEventListener('click', () => st.continueClicks++);
+  document.getElementById('addWork').addEventListener('click', () => st.addClicks++);
+  document.querySelectorAll('.remove').forEach(b => b.addEventListener('click', () => st.removeClicks++));
+  window.__state = () => ({...st,
+    employers: [...document.querySelectorAll('[id$=_employer]')].map(e => e.value)});
+</script>
+</body></html>

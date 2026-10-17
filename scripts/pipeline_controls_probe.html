@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Jobo control integration probe</title>
+<style>body{font:16px sans-serif;max-width:750px;margin:32px auto}label{display:block;margin:18px 0 6px}.choice label{display:inline}.select-controller{border:1px solid #777;padding:12px;cursor:pointer}li[role=option],.react-datepicker__year-text{padding:12px;cursor:pointer}button{padding:10px;margin:8px}.react-datepicker-popper{border:1px solid #777;background:white}.description{line-height:1.6}</style></head>
+<body><h1>Backend Engineer at Local Test Company</h1>
+<section class="description">{{LONG_DESCRIPTION}}</section>
+<form id="application">
+<label for="resume">Resume</label><input id="resume" name="resume" type="file" accept=".pdf" required>
+<label for="current-company">Current company (optional)</label><input id="current-company" name="currentCompany" value="Autofilled old employer">
+<fieldset class="choice"><legend>Previously employed here?</legend>
+<div role="radio" data-value="No" aria-checked="false" tabindex="0"><input id="previous-no" name="previous" type="radio" value="No" required aria-labelledby="previous-no-label" style="display:none"><div id="previous-no-label">No</div></div>
+<div role="radio" data-value="Yes" aria-checked="false" tabindex="0"><input id="previous-yes" name="previous" type="radio" value="Yes" aria-labelledby="previous-yes-label" style="display:none"><div id="previous-yes-label">Yes</div></div></fieldset>
+<div data-testid="custom-question-field"><label id="degree-label">Degree</label>
+<div class="select-controller"><div id="field-67" role="combobox" aria-label="Select" aria-haspopup="listbox" aria-expanded="false" aria-required="true" tabindex="0"><p>Select</p></div></div>
+<ul id="field-67-list" role="listbox" aria-labelledby="degree-label" hidden><li id="field-67-list-option-0" role="option" tabindex="0">Bachelors</li><li id="field-67-list-option-1" role="option" tabindex="0">Masters</li></ul></div>
+<label for="educationData[0].fromTo.startDate">Education start year</label>
+<div class="react-datepicker-wrapper"><div class="react-datepicker__input-container"><input type="text" id="educationData[0].fromTo.startDate" name="startYear" placeholder="yyyy" autocomplete="off"></div></div>
+<div class="react-datepicker-popper" hidden><div class="react-datepicker"><div class="react-datepicker__year-wrapper"><button type="button" class="react-datepicker__year-text">2021</button><button type="button" class="react-datepicker__year-text">2022</button><button type="button" class="react-datepicker__year-text">2023</button></div></div></div>
+<label for="consent">I consent to the above terms</label><input id="consent" name="consent" type="checkbox" required>
+<button type="submit">Submit application</button>
+</form><p role="status" id="result"></p>
+<script>
+const state={degree:'',year:'',previous:'',currentCompany:'Autofilled old employer',consent:false,uploads:0,remounted:false,submits:0};
+const resume=document.getElementById('resume');
+function observeUpload(input){input.addEventListener('change',()=>{if(input.files.length){state.uploads++;if(!state.remounted){state.remounted=true;setTimeout(()=>{const replacement=input.cloneNode();replacement.value='';input.replaceWith(replacement);observeUpload(replacement)},150)}}})};
+observeUpload(resume);
+document.getElementById('current-company').addEventListener('input',e=>state.currentCompany=e.target.value);
+for(const wrapper of document.querySelectorAll('.choice [role=radio]'))wrapper.addEventListener('click',e=>{
+ if(!e.isTrusted)return;
+ for(const other of document.querySelectorAll('.choice [role=radio]')){const selected=other===wrapper;other.querySelector('input').checked=selected;other.setAttribute('aria-checked',String(selected))}
+ state.previous=wrapper.querySelector('input').value;
+});
+const combo=document.getElementById('field-67'),list=document.getElementById('field-67-list');
+combo.addEventListener('click',()=>{const open=combo.getAttribute('aria-expanded')!=='true';combo.setAttribute('aria-expanded',String(open));list.hidden=!open});
+for(const option of list.children)option.addEventListener('click',()=>{state.degree=option.textContent;combo.querySelector('p').textContent=state.degree;combo.setAttribute('aria-expanded','false');list.hidden=true});
+const year=document.getElementById('educationData[0].fromTo.startDate'),picker=document.querySelector('.react-datepicker-popper');
+year.addEventListener('click',()=>picker.hidden=false);
+year.addEventListener('focus',()=>picker.hidden=false);
+year.addEventListener('input',e=>{e.preventDefault();year.value=state.year;year.blur()});
+for(const option of picker.querySelectorAll('button'))option.addEventListener('click',()=>{state.year=option.textContent;year.value=state.year;picker.hidden=true});
+document.getElementById('consent').addEventListener('change',e=>state.consent=e.target.checked);
+document.getElementById('application').addEventListener('submit',async e=>{
+ e.preventDefault();state.submits++;
+ const file=document.getElementById('resume').files[0];let bytes='';
+ if(file){const data=new Uint8Array(await file.arrayBuffer());for(const b of data)bytes+=String.fromCharCode(b)}
+ const response=await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fields:state,filename:file?.name||'',file:btoa(bytes)})});
+ const message=await response.json();document.getElementById('result').textContent=message.message;
+});
+window.probeState=()=>({...state,resume:Array.from(document.getElementById('resume').files).map(f=>f.name)});
+</script></body></html>

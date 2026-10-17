@@ -1,0 +1,84 @@
+{
+  "_comment": "Answers for ./setup.sh --non-interactive --answers FILE (JSON). Fictional person; copy and edit. Steps that need a real login (Gmail sign-in, LinkedIn sign-in, gh repo create) are always skipped in this mode; cron is installed only when install_cron is true; existing files that would change are kept unless overwrite is true. Prefer account_password_env (name of an env var holding the password) over writing the password here.",
+  "full_name": "Alex Example",
+  "first_name": "Alex",
+  "email": "alex.example@example.com",
+  "phone": "+1 555 0100",
+  "location": "Springfield, USA",
+  "linkedin_url": "https://www.linkedin.com/company/example",
+  "github_url": "https://github.com/example",
+  "website_url": "https://alex.example.com/",
+  "upload_slug": "Alex_Example",
+  "headline": "a backend engineer",
+  "school": {
+    "name": "Lakeside Institute of Information Technology Springfield",
+    "spellings": [
+      "Lakeside Institute of Information Technology, Springfield",
+      "LIIT Springfield",
+      "Lakeside Institute of Information Technology",
+      "LIIT"
+    ]
+  },
+  "city": {
+    "name": "Springfield",
+    "spellings": ["Springfield City", "Springfield, Illinois", "Illinois"]
+  },
+  "education": {
+    "degree": "B.S. Computer Science",
+    "location": "Springfield",
+    "start": "Aug 2019",
+    "end": "May 2023",
+    "gpa": "3.5"
+  },
+  "current_job": {
+    "employer": "Example Corp",
+    "title": "Backend Engineer",
+    "location": "Springfield",
+    "start": "Jun 2023",
+    "employment_type": "full-time",
+    "summary": "Python/PostgreSQL order service, event-driven reporting on SQS/Lambda."
+  },
+  "work_history": [
+    {
+      "employer": "Sample Labs",
+      "title": "Software Engineering Intern",
+      "location": "Remote",
+      "start": "Jan 2023",
+      "end": "May 2023",
+      "summary": "internal Go tooling."
+    }
+  ],
+  "years_experience": "3",
+  "current_pay": "100,000 USD (base)",
+  "expected_pay": "120,000 USD",
+  "expected_pay_range": "120,000-135,000",
+  "notice_period": "30 days notice",
+  "work_authorization": "authorized to work in the USA, no sponsorship needed",
+  "relocation": "Open to relocation/remote/hybrid.",
+  "job_preferences": "A backend or platform role where I own services end to end. Skip internships.",
+  "skills": [
+    "**Languages:** Python, Go, TypeScript, SQL",
+    "**Data & Infra:** PostgreSQL, Redis, Docker"
+  ],
+  "projects": [
+    {
+      "name": "Trail Planner",
+      "url": "https://github.com/example/trail-planner",
+      "stack": "Python, FastAPI, Redis, React",
+      "description": "Suggests hiking trails from elevation and weather data."
+    }
+  ],
+  "resume_tex": "",
+  "account_password": "Example-Passw0rd!",
+  "account_password_env": "",
+  "ollama_model": "qwen2.5:3b",
+  "usage_limits": {"session": "0.30", "weekly": "0.50"},
+  "install_playwright_chromium": false,
+  "pull_ollama_model": false,
+  "setup_hermes_profile": false,
+  "pin_hermes": false,
+  "gmail_client_secret": "",
+  "install_cron": false,
+  "data_repo": "",
+  "overwrite": false
+}

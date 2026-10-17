@@ -1,0 +1,254 @@
+<!doctype html>
+<html>
+<head><title>Dropdown probe</title></head>
+<body style="font-family:sans-serif;max-width:700px;margin:30px auto">
+<h1>Form-widget probe</h1>
+<p>Reproduces the widget shapes that burned whole turn budgets on real ATS
+forms: native selects, an Avature-style select2 over a hidden select, a
+remote-search select2 with no preloaded options, and a React-controlled text
+input that ignores naive value assignment.</p>
+
+<!-- 1. plain native select -->
+<h3>1. Native select</h3>
+<label for="country">Country/Region Code</label>
+<select id="country" name="country">
+  <option value="">-- select --</option>
+  <option value="in">India</option>
+  <option value="us">United States</option>
+  <option value="de">Germany</option>
+</select>
+
+<!-- 2. Avature pattern: visible fake widget + hidden real select -->
+<h3>2. select2 over a hidden select (Avature "college name")</h3>
+<label for="10955_input">College Name</label>
+<div class="select2-container">
+  <input id="10955_input" role="combobox" autocomplete="off" placeholder="Search...">
+  <select id="10955" name="college" style="display:none">
+    <option value="">-- select --</option>
+    <option value="liit-springfield">LIIT Springfield</option>
+    <option value="iit-delhi">IIT Delhi</option>
+    <option value="nit-riverton">NIT Riverton</option>
+  </select>
+</div>
+
+<!-- 3. remote-search select2: hidden select is EMPTY until the server replies -->
+<h3>3. Remote-search select2 (options arrive only after you type)</h3>
+<label for="school_input">School</label>
+<div class="select2-container">
+  <input id="school_input" role="combobox" autocomplete="off" placeholder="Type to search...">
+  <select id="school" name="school" style="display:none">
+    <option value="">-- select --</option>
+  </select>
+</div>
+<p style="font-size:12px;color:#666">Simulates a real server-backed search: the
+hidden select stays empty until a query matches something in the remote
+"database" below. A query that matches nothing yields nothing, which is the
+Wingtip "No results found" case.</p>
+
+<!-- 4. React-style controlled input -->
+<h3>4. Controlled text input (rejects naive assignment)</h3>
+<label for="notice">Current CTC</label>
+<input id="notice" name="notice" type="text">
+
+<!-- 5. native date input: only accepts ISO yyyy-mm-dd -->
+<h3>5. Native date input (job489's "Earliest start date")</h3>
+<label for="startdate">Earliest start date</label>
+<input id="startdate" name="startdate" type="date">
+
+<!-- 6. text field mimicking a date, US order via placeholder -->
+<h3>6. Text field posing as a date picker</h3>
+<label for="joindate">Available from</label>
+<input id="joindate" name="joindate" type="text" placeholder="MM/DD/YYYY">
+
+<!-- 7. degree select whose correct option sits past position 8 (job570) -->
+<h3>7. Long native select (correct option hidden past the truncation point)</h3>
+<label for="degree">Highest level of education</label>
+<select id="degree" name="degree">
+  <option value="">-- select --</option>
+  <option value="assoc">Associate's Degree</option>
+  <option value="doc">Advanced Degree - Doctorate</option>
+  <option value="ma">Advanced Degree - Masters</option>
+  <option value="mba">Advanced Degree - MBA</option>
+  <option value="jd">Advanced Degree - JD</option>
+  <option value="md">Advanced Degree - MD</option>
+  <option value="hs">High School</option>
+  <option value="some">Some College</option>
+  <option value="beng">Bachelor - Engineering</option>
+  <option value="barts">Bachelor - Arts</option>
+  <option value="none">None of the above</option>
+</select>
+
+<!-- 8. industry select: "Engineering" is not offered, "Information Technology" is -->
+<h3>8. Industry select (the asked-for word is absent, a true synonym is present)</h3>
+<label for="industry">Position Function</label>
+<select id="industry" name="industry">
+  <option value="">-- select --</option>
+  <option value="board">Board</option>
+  <option value="bd">Business Development</option>
+  <option value="it">Information Technology</option>
+  <option value="sales">Sales</option>
+</select>
+
+<!-- 9. school select that genuinely does not contain the user's college (Wingtip) -->
+<h3>9. School select with NO valid option (must refuse, never invent)</h3>
+<label for="school2">School (no Indian colleges listed)</label>
+<select id="school2" name="school2">
+  <option value="">-- select --</option>
+  <option value="harvard">Harvard University</option>
+  <option value="stanford">Stanford University</option>
+  <option value="mit">MIT</option>
+</select>
+
+<!-- 10. Greenhouse education trio: a dirty combobox wipes its siblings -->
+<h3>10. React comboboxes that clear siblings when one is left dirty (job516)</h3>
+<label>School <input id="gh_school" role="combobox" aria-autocomplete="list" class="select__input" autocomplete="off"></label>
+<label>Degree <input id="gh_degree" role="combobox" aria-autocomplete="list" class="select__input" autocomplete="off"></label>
+<span id="gh_committed"></span>
+
+<hr>
+<h3>Current state</h3>
+<pre id="state"></pre>
+
+<script>
+// A React-like controlled input: it reverts any value that arrives without a
+// proper input event, which is why JS `el.value = x` alone silently fails on
+// real ATS forms.
+(function () {
+  const el = document.getElementById('notice');
+  let committed = '';
+  el.addEventListener('input', () => { committed = el.value; });
+  setInterval(() => {
+    if (el.value !== committed) el.value = committed;
+  }, 60);
+})();
+
+// Field 3 simulates a REAL server-backed select2: typing into the visible
+// input queries a remote "database" and, after a delay, populates the hidden
+// select plus a rendered listbox. A query matching nothing populates nothing,
+// which is Wingtip's live "No results found" for LIIT Springfield.
+(function () {
+  const DB = [
+    {value: 'stanford', text: 'Stanford University'},
+    {value: 'harvard', text: 'Harvard University'},
+    {value: 'mit', text: 'MIT'},
+    {value: 'oxford', text: 'University of Oxford'}
+  ];
+  const input = document.getElementById('school_input');
+  const sel = document.getElementById('school');
+  const box = input.parentElement;
+  let listEl = null;
+  const clearList = () => { if (listEl) { listEl.remove(); listEl = null; } };
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = (input.value || '').trim().toLowerCase();
+    timer = setTimeout(() => {
+      clearList();
+      // Wipe previously fetched results, exactly as select2 does per query.
+      Array.from(sel.options).forEach(o => { if (o.value) o.remove(); });
+      if (!q) return;
+      const hits = DB.filter(r => r.text.toLowerCase().includes(q));
+      if (!hits.length) return;          // "No results found"
+      listEl = document.createElement('ul');
+      listEl.className = 'select2-results__options';
+      hits.forEach(r => {
+        const o = document.createElement('option');
+        o.value = r.value; o.text = r.text;
+        sel.appendChild(o);
+        const li = document.createElement('li');
+        li.className = 'select2-results__option';
+        li.textContent = r.text;
+        li.addEventListener('mouseup', () => {
+          sel.value = r.value;
+          sel.dispatchEvent(new Event('change', {bubbles: true}));
+          input.value = r.text;
+          clearList();
+        });
+        listEl.appendChild(li);
+      });
+      box.appendChild(listEl);
+    }, 250);   // server round-trip
+  });
+})();
+
+// Field 10 reproduces Bluegum/Greenhouse's education trio. Each combobox commits
+// only when a real option is clicked. If ANY of them is left holding raw typed
+// text (a search nobody committed), the group treats that as pending state and
+// clears its siblings on the next interaction - which is exactly what looked
+// like "these fields share state and wipe each other" on job516. A setter that
+// cleans up after a failed search never triggers it.
+(function () {
+  const DB = {
+    gh_school: ['Stanford University', 'Harvard University'],
+    gh_degree: ["Bachelor's Degree", "Master's Degree"]
+  };
+  const committed = {gh_school: '', gh_degree: ''};
+  const ids = Object.keys(DB);
+  const render = () => {
+    document.getElementById('gh_committed').textContent =
+      ' committed: ' + JSON.stringify(committed);
+  };
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    let menu = null;
+    const kill = () => { if (menu) { menu.remove(); menu = null; } };
+    el.addEventListener('keydown', e => { if (e.key === 'Escape') kill(); });
+    // Greenhouse re-renders the education group on focus/interaction and drops
+    // any field whose visible text is not a committed selection. The victim is
+    // whichever field was left dirty, and the damage becomes visible when the
+    // group is next touched - which is why job516's agent saw the fields
+    // "clearing each other" a turn after the fact.
+    const reconcileGroup = () => {
+      ids.forEach(other => {
+        const oel = document.getElementById(other);
+        const raw = (oel.value || '').trim();
+        if (raw && raw !== committed[other]) { committed[other] = ''; oel.value = ''; }
+      });
+      render();
+    };
+    el.addEventListener('focus', reconcileGroup);
+    el.addEventListener('input', () => {
+      kill();
+      const q = (el.value || '').trim().toLowerCase();
+      if (!q) { committed[id] = ''; render(); return; }
+      const hits = DB[id].filter(t => t.toLowerCase().includes(q));
+      if (!hits.length) { render(); return; }
+      menu = document.createElement('ul');
+      menu.className = 'select__menu';
+      hits.forEach(t => {
+        const li = document.createElement('li');
+        li.className = 'select__option';
+        li.setAttribute('role', 'option');
+        li.textContent = t;
+        li.addEventListener('mouseup', () => {
+          committed[id] = t; el.value = t; kill(); render();
+        });
+        menu.appendChild(li);
+      });
+      el.parentElement.appendChild(menu);
+      render();
+    });
+  });
+  render();
+})();
+
+window.__formState = () => JSON.stringify({
+  country: document.getElementById('country').value,
+  college: document.getElementById('10955').value,
+  school: document.getElementById('school').value,
+  notice: document.getElementById('notice').value,
+  startdate: document.getElementById('startdate').value,
+  joindate: document.getElementById('joindate').value,
+  degree: document.getElementById('degree').value,
+  industry: document.getElementById('industry').value,
+  school2: document.getElementById('school2').value,
+  gh_school: document.getElementById('gh_school').value,
+  gh_degree: document.getElementById('gh_degree').value
+});
+
+setInterval(() => {
+  document.getElementById('state').textContent = window.__formState();
+}, 300);
+</script>
+</body>
+</html>

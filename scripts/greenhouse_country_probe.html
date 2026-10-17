@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head><title>Greenhouse country ambiguity probe</title></head>
+<body style="font-family:sans-serif;max-width:700px;margin:30px auto">
+<h1>Greenhouse: two controls that both look like "Country"</h1>
+<p>Reproduces the shape behind job591 (Proseware, 2026-09-11). Greenhouse
+renders the phone-number country PREFIX as a react-select whose input carries
+<code>id="country"</code> and whose committed value is <code>+91</code>. The
+real country-of-residence field is a separate react-select further down.</p>
+
+<!-- Phone row: label says "Phone", but the prefix widget's input is id=country -->
+<h3>Phone</h3>
+<label for="phone">Phone *</label>
+<div class="select-shell" style="display:flex;gap:6px;align-items:center">
+  <div class="select__container">
+    <div class="select__control">
+      <div class="select__value-container select__value-container--has-value">
+        <div class="select__single-value singleValue">+91</div>
+        <div class="select__input-container">
+          <input id="country" role="combobox" aria-autocomplete="list"
+                 class="select__input" autocomplete="off">
+        </div>
+      </div>
+    </div>
+  </div>
+  <input id="phone" name="phone" type="tel" placeholder="Phone number">
+</div>
+
+<!-- The REAL country field -->
+<h3>Country of residence</h3>
+<label for="country_residence">Country *</label>
+<div class="select__container">
+  <div class="select__control">
+    <div class="select__value-container">
+      <div class="select__input-container">
+        <input id="country_residence" role="combobox" aria-autocomplete="list"
+               class="select__input" autocomplete="off">
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+<h3>Current state</h3>
+<pre id="state"></pre>
+
+<script>
+// Both widgets behave like react-select: typing opens a listbox, and only a
+// clicked option commits a value into the control's singleValue node.
+(function () {
+  const WIDGETS = {
+    country:           {opts: ['+91', '+1', '+44'],               committed: '+91'},
+    country_residence: {opts: ['India', 'United States', 'Germany'], committed: ''}
+  };
+
+  const controlOf = (el) => {
+    for (let n = el.parentElement, h = 0; n && h < 6; n = n.parentElement, h++) {
+      if (/select__control/.test((n.className || '').toString())) return n;
+    }
+    return el.parentElement;
+  };
+
+  const render = (id) => {
+    const el = document.getElementById(id);
+    const ctl = controlOf(el);
+    const vc = ctl.querySelector('.select__value-container');
+    let sv = vc.querySelector('.singleValue');
+    const val = WIDGETS[id].committed;
+    if (val) {
+      if (!sv) {
+        sv = document.createElement('div');
+        sv.className = 'select__single-value singleValue';
+        vc.insertBefore(sv, vc.firstChild);
+      }
+      sv.textContent = val;
+      vc.classList.add('select__value-container--has-value');
+    } else if (sv) {
+      sv.remove();
+      vc.classList.remove('select__value-container--has-value');
+    }
+  };
+
+  Object.keys(WIDGETS).forEach(id => {
+    const el = document.getElementById(id);
+    let menu = null;
+    const kill = () => { if (menu) { menu.remove(); menu = null; } };
+    el.addEventListener('keydown', e => { if (e.key === 'Escape') kill(); });
+    el.addEventListener('input', () => {
+      kill();
+      const q = (el.value || '').trim().toLowerCase();
+      if (!q) return;
+      const hits = WIDGETS[id].opts.filter(o => o.toLowerCase().includes(q));
+      if (!hits.length) return;
+      menu = document.createElement('ul');
+      menu.className = 'select__menu';
+      hits.forEach(t => {
+        const li = document.createElement('li');
+        li.className = 'select__option';
+        li.setAttribute('role', 'option');
+        li.textContent = t;
+        li.addEventListener('mouseup', () => {
+          WIDGETS[id].committed = t;
+          el.value = '';
+          kill();
+          render(id);
+        });
+        menu.appendChild(li);
+      });
+      controlOf(el).appendChild(menu);
+    });
+    render(id);
+  });
+
+  window.__formState = () => JSON.stringify({
+    phone_prefix: WIDGETS.country.committed,
+    country_residence: WIDGETS.country_residence.committed,
+    phone: document.getElementById('phone').value
+  });
+
+  setInterval(() => {
+    document.getElementById('state').textContent = window.__formState();
+  }, 300);
+})();
+</script>
+</body>
+</html>

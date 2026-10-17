@@ -1,0 +1,125 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>upload chooser / greenhouse chip probe</title>
+<style>.displayNone{display:none}.glyphicon{display:inline-block;width:22px;height:22px;background:#777;cursor:pointer}
+.tile{display:inline-block;width:220px;margin:8px;border:1px solid #ccc;padding:6px}.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}</style>
+</head><body>
+<!--
+Local replicas of two live upload shapes that NEED_UPLOAD could not handle
+(measured 2026-10-04; see scripts/test_upload_chooser_iframe.py):
+
+?shape=sf   SAP SuccessFactors "My Documents" tiles (Litware 1316). The "+" is a
+            role=button span `<n>:_attachIcon.addAttachments` inside an onclick
+            wrapper; its handler calls .click() on an <input type=file> that is
+            NEVER attached to the document, so a DOM walk finds no input and the
+            browser opens its native file chooser. On change the tile shows the
+            file name in `<n>:_attachDownloadLabel` (displayNone removed).
+            DOM taken from the job 1316 transcript (2026-10-03 11:59-12:00).
+?shape=gh   Greenhouse job-boards form (Eastlake 1266). input#resume.visually-hidden;
+            on change the app uploads, then REMOVES the input and renders a chip
+            "resume.pdf [Remove file]". ?shape=gh-reject shows an error, no chip.
+?shape=apply  Only a "Submit application" button exists: nothing may be clicked.
+-->
+<form id="app">
+  <h2>Job Application Form</h2>
+  <div id="docs"></div>
+  <button type="button" id="apply" onclick="window.__applied++">Submit application</button>
+</form>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search);
+  // /json/new?<url> keeps only the first query parameter, so the variant
+  // lives in the shape name itself (gh-reject), not in a second &param.
+  const shape = (q.get('shape') || 'sf').split('-')[0];
+  const reject = (q.get('shape') || '').endsWith('-reject');
+  window.__applied = 0; window.__clicks = {}; window.__writes = 0; window.__picked = {};
+  const docs = document.getElementById('docs');
+
+  // As on the live Litware form: the + span is named only through
+  // aria-labelledby (label id + hidden action text), and it sits inside an
+  // onclick wrapper inside a cursor:pointer tile.
+  function sfTile(idx, labelId, label, prompt, parent) {
+    const t = document.createElement('div');
+    t.className = 'tile attachmentField';
+    t.innerHTML =
+      '<span class="labelText" id="' + labelId + '">' + label + '</span>' +
+      '<div class="attachWrapper" id="' + idx + ':_attachWrapper" style="cursor:pointer">' +
+      '  <span role="tooltip">' + prompt + '</span><span class="attachmentPrompt">' + prompt + '</span>' +
+      '  <div role="button" tabindex="0" id="' + idx + ':_attachDownloadLabel" aria-labelledby="' + labelId + ' ' + idx + ':_ariaAttachLabel"' +
+      '       class="attachmentLabel attachmentText displayNone" onclick="void 0"></div>' +
+      '  <div class="attachActions" id="' + idx + ':_wrap" onclick="void 0">' +
+      '    <span role="button" tabindex="0" id="' + idx + ':_attachIcon" class="glyphicon glyphicon-plus-sign addAttachments"' +
+      '      aria-labelledby="' + labelId + ' ' + idx + ':_ariaActionLabel"></span>' +
+      '    <span class="hiddenAriaContent displayNone" id="' + idx + ':_ariaActionLabel">' + prompt + ' Opens a dialog</span>' +
+      '    <span role="tooltip" class="displayNone">' + prompt + ' Opens a dialog</span>' +
+      '  </div>' +
+      '</div>';
+    (parent || docs).appendChild(t);
+    t.querySelector('.addAttachments').addEventListener('click', function () {
+      window.__clicks[idx] = (window.__clicks[idx] || 0) + 1;
+      const input = document.createElement('input');   // never attached to the DOM
+      input.type = 'file';
+      input.addEventListener('change', function () {
+        window.__writes++;
+        const name = input.files.length ? input.files[0].name : '';
+        window.__picked[idx] = name;
+        const dl = document.getElementById(idx + ':_attachDownloadLabel');
+        dl.textContent = name;
+        dl.classList.remove('displayNone');
+        t.querySelector('.attachmentPrompt').classList.add('displayNone');
+      });
+      input.click();
+    });
+  }
+
+  function ghSlot(id, label) {
+    const g = document.createElement('div');
+    g.setAttribute('role', 'group');
+    g.className = 'file-upload';
+    g.innerHTML = '<div class="label upload-label">' + label + '</div>' +
+      '<div class="file-upload__wrapper"><button type="button" class="btn">Attach</button>' +
+      '<label class="visually-hidden" for="' + id + '">Attach</label>' +
+      '<input id="' + id + '" class="visually-hidden" type="file" accept=".pdf,.doc,.docx,.txt,.rtf">' +
+      '<button type="button" class="btn">Dropbox</button><button type="button" class="btn">Enter manually</button></div>';
+    docs.appendChild(g);
+    g.querySelector('input').addEventListener('change', function (ev) {
+      window.__writes++;
+      const name = ev.target.files.length ? ev.target.files[0].name : '';
+      setTimeout(function () {           // the app's upload round-trip
+        const w = g.querySelector('.file-upload__wrapper');
+        if (reject) {
+          w.insertAdjacentHTML('beforeend', '<p class="error">Unable to upload the file. Please choose another one.</p>');
+          return;
+        }
+        w.innerHTML = '<div class="file-upload__filename"><p class="body">' + name +
+          '</p><button type="button" aria-label="Remove file">x</button></div>';
+        window.__picked[id] = name;
+      }, 400);
+    });
+  }
+
+  if (shape === 'sf') {
+    // The section's own instruction text names BOTH kinds, and a third
+    // "Supporting Documentation" tile has the same + control: neither may
+    // pull the resume away from the Resume/CV tile.
+    const grp = document.createElement('div');
+    grp.setAttribute('role', 'group'); grp.setAttribute('aria-label', 'My Documents');
+    grp.innerHTML = '<p>When attaching any file types below, please DO NOT include any headshot photographs. ' +
+      'Accepted file types: DOCX, PDF, Image and Text (MSG, PPT and XLS file types are not accepted for resume or cover letters)</p>';
+    docs.appendChild(grp);
+    const row = document.createElement('div'); grp.appendChild(row);
+    sfTile('51:', '38:', 'Resume/CV', 'Upload a Resume', row);
+    sfTile('53:', '40:', 'Cover Letter', 'Attach a Cover Letter', row);
+    const row2 = document.createElement('div'); grp.appendChild(row2);
+    sfTile('55:', '42:', 'Supporting Documentation (References, Work Examples, etc.)', 'Add a Document', row2);
+  } else if (shape === 'gh') {
+    ghSlot('resume', 'Resume/CV*');
+    ghSlot('cover_letter', 'Cover Letter');
+  }
+  window.__state = function () {
+    return JSON.stringify({clicks: window.__clicks, writes: window.__writes, picked: window.__picked,
+      applied: window.__applied, inputs: document.querySelectorAll('input[type=file]').length,
+      text: document.getElementById('docs').innerText.replace(/\s+/g, ' ').slice(0, 200)});
+  };
+})();
+</script>
+</body></html>

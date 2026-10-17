@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><title>Isolated widget regressions</title>
+<style>body{font:16px sans-serif}label{display:block;margin:12px}input{min-height:22px}.react-datepicker{background:#eee;padding:10px}.react-datepicker__year-text,.react-datepicker__month-text{display:inline-block;padding:8px;cursor:pointer}[role=combobox]{border:1px solid;padding:8px;width:300px}[role=option]{padding:8px;cursor:pointer}</style>
+<fieldset><legend>Previous worker</legend><label>No<input id="worker-no" type="radio" name="worker" value="No" required></label><label>Yes<input id="worker-yes" type="radio" name="worker" value="Yes"></label></fieldset>
+<label>No<input id="unrelated-no" type="radio" name="unrelated" value="No"></label>
+<label>Consent<input id="consent" type="checkbox" value="consent-token" required></label>
+<label>Reverting<input id="reverting" type="checkbox" value="keep"></label>
+<label>Plain year<input id="plain"></label><label>Native date<input id="native-date" type="date"></label>
+<div id="calendars"></div>
+<div style="height:1100px"></div><div class="custom-question"><label class="custom-question-label">Are you legally authorized to work? *</label><div><div id="field-67" role="combobox" aria-haspopup="listbox" aria-label="Select" tabindex="0"><p>Select</p></div></div></div>
+<div class="custom-question"><label>Empty choices</label><div id="empty" role="combobox" aria-haspopup="listbox" aria-label="Select" tabindex="0"><p>Select</p></div></div>
+<div role="combobox"><input id="wrapped" aria-label="Wrapped input"></div>
+<ul id="decoy" role="listbox"><li role="option">Yes</li><li role="option">No</li></ul>
+<script>
+window.events=[];window.held={};
+for(const e of document.querySelectorAll('input[type=radio],input[type=checkbox]'))e.addEventListener('click',ev=>{events.push([e.id,ev.isTrusted]);if(e.id==='reverting')setTimeout(()=>e.checked=false,150)});
+for(const [id,fmt] of [['year-from','yyyy'],['year-to','yyyy'],['month','MM/yyyy']]){
+ const box=document.createElement('div');box.className='form-group';box.innerHTML=`<label for="${id}">${id}</label><div class="react-datepicker-wrapper"><div class="react-datepicker__input-container"><input type="text" id="${id}" value=""></div></div>`;calendars.append(box);
+ const input=box.querySelector('input');let year=2026;input.addEventListener('input',()=>setTimeout(()=>input.value=held[id]||'',100));
+ function open(){document.querySelectorAll('.react-datepicker-popper').forEach(n=>n.remove());const pop=document.createElement('div');pop.className='react-datepicker-popper';box.append(pop);render(pop)}
+ function render(pop){pop.innerHTML='<div class="react-datepicker"><button type="button" class="react-datepicker__navigation--previous">Previous Year</button><span class="react-datepicker__header">'+year+'</span><button type="button" class="react-datepicker__navigation--next">Next Year</button><div class="cells"></div></div>';
+ pop.querySelector('.react-datepicker__navigation--previous').onclick=()=>{year-=fmt==='yyyy'?12:1;render(pop)};pop.querySelector('.react-datepicker__navigation--next').onclick=()=>{year+=fmt==='yyyy'?12:1;render(pop)};
+ for(let i=0;i<12;i++){const cell=document.createElement('div');cell.className=fmt==='yyyy'?'react-datepicker__year-text':'react-datepicker__month-text';cell.textContent=fmt==='yyyy'?String(year-9+i):['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i];cell.onclick=ev=>{if(!ev.isTrusted)return;held[id]=fmt==='yyyy'?cell.textContent:String(i+1).padStart(2,'0')+'/'+year;input.value=held[id];pop.remove()};pop.querySelector('.cells').append(cell)}}input.addEventListener('click',open);
+}
+for(const id of ['field-67','empty']){const el=document.getElementById(id);el.addEventListener('click',ev=>{if(!ev.isTrusted)return;events.push([id,ev.isTrusted]);setTimeout(()=>{document.getElementById(id+'-list')?.remove();const list=document.createElement('ul');list.id=id+'-list';list.setAttribute('role','listbox');el.parentElement.append(list);if(id==='empty')return;for(const text of ['Yes','No']){const li=document.createElement('li');li.setAttribute('role','option');li.textContent=text;li.onclick=ev=>{if(!ev.isTrusted)return;held[id]=text;el.querySelector('p').textContent=text;list.remove()};list.append(li)}},160)})}
+</script>

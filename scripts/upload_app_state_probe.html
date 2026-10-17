@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+Faithful replica of the Phenom apply page used by careers.alpineer.com (Oracle
+backend) and careers.avocet.com (Taleo backend), measured live 2026-10-03:
+
+  * The resume <input type=file> has NO attributes we can name (only type,
+    autocomplete, tabindex, style=display:none) and sits in
+    div.resume-upload-wrapper next to an "Upload Resume" button.
+  * Avocet adds a second attribute-less input inside
+    label.file-label "Upload From Device" (generic attachments).
+  * The app uploads on `change` with its own XHR (POST /fileUpload). Two
+    overlapping uploads (our old synthetic change on top of the trusted one)
+    leave "Unable to upload the resume. Please choose another one." on the
+    page, while input.files still holds the file.
+  * A good upload shows a "resume.pdf" link and raises a native
+    alert("You have Uploaded Resume Successfully.").
+-->
+<html><head><title>Phenom apply replica</title></head>
+<body style="font-family:sans-serif;max-width:640px;margin:40px auto">
+<h1>My information</h1>
+<div class="options-block resume-group"><div class="cloud-options"><div class="drives">
+  <div class="resume-upload-wrapper"><input type="file" autocomplete="off" tabindex="-1" style="display: none;"><button type="button" class="upload-resume-btn btn primary-button">Upload Resume</button></div>
+</div></div></div>
+<p id="status"></p>
+<div class="attachments">
+  <label class="file-label" role="presentation" tabindex="0"><span class="title-text">Upload From Device</span><input type="file" value="" style="display: none; color: unset;"></label>
+</div>
+<button type="button" id="next">Next</button>
+<script>
+const resumeInput = document.querySelector('.resume-upload-wrapper input');
+const otherInput = document.querySelector('.file-label input');
+const status = document.getElementById('status');
+let inflight = 0, uploads = 0, failed = false;
+window.__appState = () => JSON.stringify({uploads, failed, status: status.innerText,
+  resume: Array.from(resumeInput.files).map(f => f.name), other: Array.from(otherInput.files).map(f => f.name)});
+resumeInput.addEventListener('change', () => {
+  inflight++; uploads++;
+  if (inflight > 1) failed = true;
+  setTimeout(() => {
+    inflight--;
+    if (failed || /reject/.test(location.search)) {
+      status.innerHTML = 'Unable to upload the resume. Please choose another one.';
+    } else {
+      status.innerHTML = '<a href="#">' + resumeInput.files[0].name + '</a>';
+      alert('You have Uploaded Resume Successfully.');
+    }
+  }, 300);
+});
+</script>
+</body></html>

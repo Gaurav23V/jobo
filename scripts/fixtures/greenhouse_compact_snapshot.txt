@@ -1,0 +1,429 @@
+- main
+  - link "Proseware Logo" [ref=e21]
+    - image "Proseware Logo"
+  - heading "Software Engineer (Example Role)" [level=1, ref=e1]
+  - image
+  - StaticText "India"
+  - button "Apply" [ref=e2]
+  - generic
+    - StaticText "Lorem ipsum dolor sit amet consectetur"
+    - strong
+      - StaticText "Do eiusmod tempor incididunt"
+    - StaticText "Dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem"
+    - strong
+      - emphasis
+        - StaticText "Amet consectetur"
+    - StaticText "Sed do"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Ut labore"
+      - strong
+        - StaticText "Aliqua enim"
+      - StaticText "Nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Eiusmod tempor"
+      - strong
+        - StaticText "Et dolore"
+      - StaticText "Minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Ut labore et dolore magna"
+      - strong
+        - StaticText "Veniam quis"
+      - StaticText "Laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et"
+  - generic
+    - StaticText "Enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor"
+    - strong
+      - StaticText "Adipiscing elit"
+    - StaticText "Eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim"
+  - heading "Nostrud exercitation ullamco laboris nisi" [level=3, ref=e3]
+    - strong
+      - StaticText "Lorem ipsum dolor sit amet"
+  - paragraph
+    - StaticText "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore"
+  - paragraph
+    - StaticText "Aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed"
+  - paragraph
+    - StaticText "Incididunt ut"
+    - strong
+      - StaticText "Magna aliqua"
+    - StaticText "Veniam quis"
+    - strong
+      - StaticText "Ullamco laboris nisi"
+    - StaticText "Lorem ipsum"
+    - strong
+      - StaticText "Consectetur adipiscing"
+    - StaticText "Do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur"
+  - heading "Do eiusmod" [level=3, ref=e4]
+    - strong
+      - StaticText "Labore et"
+  - paragraph
+    - StaticText "Enim minim"
+    - strong
+      - StaticText "Exercitation ullamco laboris nisi aliquip"
+    - StaticText "Ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim"
+  - paragraph
+    - StaticText "Nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt"
+  - heading "Dolore magna aliqua" [level=3, ref=e5]
+    - strong
+      - StaticText "Quis nostrud exercitation"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Aliquip commodo consequat lorem ipsum dolor sit amet"
+      - strong
+        - StaticText "Sed do"
+      - StaticText "Incididunt ut"
+      - strong
+        - StaticText "Dolore magna aliqua"
+      - StaticText "Quis nostrud"
+      - strong
+        - StaticText "Nisi aliquip"
+      - StaticText "Lorem ipsum"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Adipiscing elit sed do eiusmod tempor incididunt ut labore et"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Enim minim veniam quis nostrud exercitation ullamco laboris nisi"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Dolore magna aliqua enim minim veniam quis nostrud exercitation"
+  - heading "Aliquip commodo consequat" [level=3, ref=e6]
+    - strong
+      - StaticText "Sit amet consectetur"
+  - heading "Do eiusmod tempor incididunt" [level=3, ref=e7]
+    - strong
+      - StaticText "Dolore magna aliqua enim"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - strong
+        - StaticText "Nostrud exercitation"
+      - StaticText "Aliquip commodo consequat lorem ipsum"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Consectetur adipiscing elit sed"
+      - strong
+        - StaticText "Incididunt ut"
+      - StaticText "Dolore magna aliqua enim minim veniam quis nostrud"
+      - strong
+        - StaticText "Nisi aliquip"
+      - StaticText "Ipsum dolor"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Consectetur adipiscing elit sed do eiusmod"
+      - strong
+        - StaticText "Labore et"
+      - StaticText "Aliqua enim minim veniam quis"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Ullamco laboris nisi aliquip commodo consequat lorem"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Amet consectetur adipiscing elit sed do"
+      - strong
+        - StaticText "Ut labore"
+      - StaticText "Magna aliqua"
+      - strong
+        - StaticText "Veniam quis"
+      - StaticText "Ullamco laboris"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation"
+  - paragraph
+    - strong
+      - StaticText "Aliquip commodo"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Dolor sit amet consectetur adipiscing"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Eiusmod tempor incididunt ut labore et"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Enim minim veniam quis nostrud exercitation ullamco laboris nisi"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Lorem ipsum dolor sit amet consectetur adipiscing elit sed"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Incididunt ut labore et dolore magna aliqua enim minim veniam quis"
+  - paragraph
+  - heading "Laboris nisi aliquip commodo consequat lorem ipsum dolor sit" [level=3, ref=e8]
+    - strong
+      - StaticText "Elit sed do eiusmod tempor incididunt ut labore et"
+  - heading "Enim minim veniam quis nostrud exercitation ullamco" [level=3, ref=e9]
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Build Relationships: lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore."
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do"
+  - heading "Ut labore et dolore magna aliqua" [level=3, ref=e10]
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor"
+  - heading "Et dolore magna aliqua enim" [level=3, ref=e11]
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua"
+  - paragraph
+    - LineBreak "\n"
+    - LineBreak "\n"
+    - LineBreak "\n"
+  - heading "Quis nostrud exercitation ullamco laboris nisi" [level=2, ref=e12]
+  - heading "Lorem ipsum" [level=3, ref=e13]
+    - strong
+      - StaticText "Amet consectetur"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna"
+    - listitem [level=1]
+      - ListMarker "• "
+      - generic
+        - StaticText "Veniam quis nostrud exercitation"
+        - link "Aliquip commodo" [ref=e24]
+        - StaticText "Dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Labore et dolore magna aliqua enim minim veniam quis nostrud exercitation"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis"
+    - listitem [level=1]
+      - ListMarker "• "
+      - generic
+        - StaticText "Laboris nisi"
+        - link "Consequat lorem" [ref=e25]
+        - StaticText "Amet consectetur adipiscing elit sed do eiusmod"
+        - link "Labore et" [ref=e26]
+        - StaticText "Enim minim veniam quis nostrud exercitation ullamco"
+  - heading "Commodo consequat" [level=3, ref=e14]
+    - strong
+      - StaticText "Sit amet"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do"
+    - listitem [level=1]
+      - ListMarker "• "
+      - generic
+        - StaticText "Ut labore et dolore"
+        - link "Minim veniam" [ref=e27]
+        - StaticText "Ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit*"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor*"
+  - heading "Adipiscing elit" [level=3, ref=e15]
+    - strong
+      - StaticText "Eiusmod tempor"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris*"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Consequat lorem ipsum dolor sit amet consectetur adipiscing*"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Ut labore et dolore magna aliqua enim minim veniam quis"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet consectetur*"
+  - heading "Compensation:" [level=3, ref=e16]
+    - strong
+      - StaticText "Compensation:"
+  - list
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco*"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Commodo consequat lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod*"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Labore et dolore magna aliqua enim minim veniam quis nostrud"
+    - listitem [level=1]
+      - ListMarker "• "
+      - StaticText "Nisi aliquip commodo consequat lorem ipsum dolor sit*"
+  - paragraph
+    - emphasis
+      - StaticText "Elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis"
+  - paragraph
+    - strong
+      - StaticText "Laboris nisi aliquip commodo consequat lorem ipsum dolor sit amet"
+  - paragraph
+    - emphasis
+      - StaticText "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem"
+  - separator
+  - paragraph
+    - emphasis
+      - StaticText "Amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat lorem ipsum dolor sit"
+  - paragraph
+    - StaticText "Elit sed"
+  - image
+  - paragraph
+    - StaticText "Create a Job Alert"
+  - paragraph
+    - StaticText "Tempor incididunt ut labore et dolore magna aliqua enim minim veniam quis nostrud exercitation ullamco"
+  - link "Commodo consequat" [ref=e17]
+  - separator
+  - heading "Apply for this job" [level=2, ref=e18]
+  - paragraph
+    - StaticText "*"
+  - paragraph
+    - StaticText "indicates a required field"
+  - button "Autofill my application" [ref=e19]
+  - form
+    - generic
+      - LabelText
+        - StaticText "First Name"
+      - textbox "First Name" [required, ref=e28]
+    - generic
+      - LabelText
+        - StaticText "Last Name"
+      - textbox "Last Name" [required, ref=e29]
+    - generic
+      - LabelText
+        - StaticText "Email"
+      - textbox "Email" [required, ref=e30]
+    - group "Phone"
+      - Legend
+        - StaticText "Phone"
+      - LabelText
+        - StaticText "Country"
+      - generic
+        - log
+        - generic
+          - generic
+            - combobox "Country" [expanded=false, required, ref=e46]
+          - button "Toggle flyout" [ref=e47]
+      - generic
+        - LabelText
+        - generic
+          - textbox "Phone" [required, ref=e48]
+    - LabelText
+      - StaticText "Location (City)"
+    - generic
+      - log
+      - generic
+        - generic
+          - combobox "Location (City)" [expanded=false, required, ref=e39]
+    - button "Locate me" [ref=e22]
+    - group "Resume/CV*"
+      - generic
+        - StaticText "Resume/CV*"
+      - generic
+        - button "Attach" [ref=e31]
+        - LabelText
+        - button "Attach" [ref=e32]: No file chosen
+      - button "Dropbox" [ref=e33]
+      - button "Google Drive" [ref=e34]
+      - generic
+        - button "Enter manually" [ref=e35]
+        - LabelText
+      - paragraph
+        - StaticText "Accepted file types: pdf, doc, docx, txt, rtf"
+    - separator
+    - generic
+      - LabelText
+        - StaticText "LinkedIn Profile"
+      - textbox "LinkedIn Profile" [required, ref=e36]
+    - LabelText
+      - StaticText "Do you now or in the future require visa sponsorship to continue working in one of the countries where this job is posted?"
+    - generic
+      - log
+      - generic
+        - generic
+          - combobox "Do you now or in the future require visa sponsorship to continue working in one of the countries where this job is posted?" [expanded=false, required, ref=e40]
+        - button "Toggle flyout" [ref=e41]
+    - LabelText
+      - StaticText "Are you currently eligible to work in one of the countries where this job is posted as per this job post?"
+    - generic
+      - log
+      - generic
+        - generic
+          - combobox "Are you currently eligible to work in one of the countries where this job is posted as per this job post?" [expanded=false, required, ref=e42]
+        - button "Toggle flyout" [ref=e43]
+    - LabelText
+      - StaticText "Where did you hear about Proseware? "
+    - generic
+      - log
+      - generic
+        - generic
+          - combobox "Where did you hear about Proseware? " [expanded=false, required, ref=e44]
+        - button "Toggle flyout" [ref=e45]
+    - paragraph
+      - link "Privacy Policy" [ref=e37]
+      - link "Recruitment Privacy Notice" [ref=e38]
+    - button "Submit application" [ref=e23]
+- contentinfo
+  - link "Greenhouse logo" [ref=e20]

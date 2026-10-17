@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head><title>Rippling-style upload probe</title></head>
+<body style="font-family:sans-serif;max-width:700px;margin:30px auto">
+<h1>File input that React swaps out underneath you</h1>
+<p>Reproduces the Westbay/Rippling failure from 2026-09-11: our CDP call
+reports success, no error, and the page still holds
+<code>files=[(none)]</code>.</p>
+
+<p>The mechanism modelled here: the form re-renders and REPLACES the
+<code>&lt;input type=file&gt;</code> with a fresh, identical node. Any
+<code>backendNodeId</code> captured before that moment now refers to a detached
+element. <code>DOM.setFileInputFiles</code> against it succeeds - it really did
+set files on <em>a</em> node - but the live input the form reads is untouched.
+A verification that resolves the SAME stale id would also pass, which is why
+the check must re-find the input from the live document.</p>
+
+<div id="host">
+  <label>Resume
+    <input type="file" data-testid="input-resume" accept=".doc,.docx,.pdf">
+  </label>
+  <label>Cover letter
+    <input type="file" data-testid="input-cover_letter" accept=".doc,.docx,.pdf">
+  </label>
+</div>
+
+<hr>
+<h3>Live state (read from the CURRENT nodes in the document)</h3>
+<pre id="state"></pre>
+
+<script>
+// Swap both inputs for fresh clones a moment after load, exactly as a React
+// re-render would. Nothing else changes - same attributes, same position.
+(function () {
+  const swap = () => {
+    document.querySelectorAll('#host input[type=file]').forEach(old => {
+      const fresh = document.createElement('input');
+      fresh.type = 'file';
+      fresh.setAttribute('data-testid', old.getAttribute('data-testid'));
+      fresh.setAttribute('accept', old.getAttribute('accept'));
+      old.parentNode.replaceChild(fresh, old);
+    });
+    window.__swapped = (window.__swapped || 0) + 1;
+  };
+  // One swap shortly after load is enough to strand a handle captured during
+  // the initial DOM walk.
+  setTimeout(swap, 900);
+
+  window.__formState = () => {
+    const out = {swaps: window.__swapped || 0};
+    document.querySelectorAll('#host input[type=file]').forEach(el => {
+      out[el.getAttribute('data-testid')] =
+        Array.from(el.files || []).map(f => f.name);
+    });
+    return JSON.stringify(out);
+  };
+  setInterval(() => {
+    document.getElementById('state').textContent = window.__formState();
+  }, 300);
+})();
+</script>
+</body>
+</html>

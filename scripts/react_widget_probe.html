@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head><title>React-select + blocked-click probe</title></head>
+<body style="font-family:sans-serif;max-width:760px;margin:30px auto">
+<h1>Widgets that beat the pipeline on 2026-09-05</h1>
+
+<!-- 1. react-select clone: value lives in JS state, DOM writes are reverted -->
+<h3>1. react-select (Greenhouse/Wingtip shape)</h3>
+<p>The input's value is <em>reverted on every render</em>. Only clicking a real
+option commits it. This is the Wingtip "School" / Bluegum "School+Degree" failure.</p>
+<label for="school_rs">School</label>
+<div class="select__control" id="school_box" style="border:1px solid #999;padding:6px;width:340px">
+  <span class="select__singleValue" id="school_display" style="color:#666"></span>
+  <input id="school_rs" role="combobox" aria-expanded="false" aria-autocomplete="list"
+         class="select__input" autocomplete="off" style="border:0;outline:0;width:200px">
+</div>
+<div id="school_menu" class="select__menu" style="display:none;border:1px solid #ccc;width:340px"></div>
+
+<!-- 2. submit button under an overlay -->
+<h3>2. Submit button covered by an invisible overlay (Rippling shape)</h3>
+<div style="position:relative">
+  <button id="realsubmit" style="padding:8px 16px">Submit application</button>
+  <div id="overlay" style="position:absolute;left:0;top:0;width:260px;height:60px;
+       background:rgba(0,0,0,0);z-index:99"></div>
+</div>
+<p id="submit_result" style="color:#060;font-weight:bold"></p>
+
+<!-- 3. disabled button with an unfilled required field -->
+<h3>3. Disabled button (required field empty)</h3>
+<label for="req1">Phone Number</label>
+<input id="req1" name="req1" required>
+<button id="gatedsubmit" disabled style="padding:8px 16px">Finish</button>
+
+<hr>
+<h3>Current state</h3>
+<pre id="state"></pre>
+
+<script>
+// ---- 1. react-select clone ----
+const OPTIONS = ['LIIT Springfield', 'IIT Delhi', 'NIT Riverton', 'BITS Pilani'];
+let committed = '';                       // the ONLY real source of truth
+const input = document.getElementById('school_rs');
+const menu = document.getElementById('school_menu');
+const display = document.getElementById('school_display');
+
+// The render loop: anything typed that was not committed via an option click
+// is wiped, exactly like a controlled React component.
+setInterval(() => {
+  display.textContent = committed;
+  if (!menuOpen && input.value && input.value !== '') {
+    // not typing into an open menu -> revert
+    input.value = '';
+  }
+}, 100);
+
+let menuOpen = false;
+function openMenu() { menuOpen = true; input.setAttribute('aria-expanded','true'); }
+function closeMenu() {
+  menuOpen = false; input.setAttribute('aria-expanded','false');
+  menu.style.display = 'none'; menu.innerHTML = '';
+}
+document.getElementById('school_box').addEventListener('pointerdown', openMenu);
+input.addEventListener('input', () => {
+  if (!menuOpen) return;
+  const q = input.value.toLowerCase();
+  const hits = OPTIONS.filter(o => o.toLowerCase().includes(q));
+  menu.innerHTML = '';
+  hits.forEach(o => {
+    const d = document.createElement('div');
+    d.className = 'select__option';
+    d.setAttribute('role', 'option');
+    d.textContent = o;
+    d.style.padding = '6px'; d.style.cursor = 'pointer';
+    // Commits ONLY on a real pointer click, like react-select.
+    d.addEventListener('click', () => { committed = o; input.value = ''; closeMenu(); });
+    menu.appendChild(d);
+  });
+  menu.style.display = hits.length ? 'block' : 'none';
+});
+
+// ---- 2. overlay-blocked submit ----
+document.getElementById('realsubmit').addEventListener('click', () => {
+  document.getElementById('submit_result').textContent = 'APPLICATION SUBMITTED';
+});
+
+// ---- 3. gated submit ----
+document.getElementById('req1').addEventListener('input', (e) => {
+  document.getElementById('gatedsubmit').disabled = e.target.value.trim() === '';
+});
+
+window.__probeState = () => JSON.stringify({
+  school: committed,
+  submitted: document.getElementById('submit_result').textContent === 'APPLICATION SUBMITTED',
+  gated_disabled: document.getElementById('gatedsubmit').disabled
+});
+setInterval(() => {
+  document.getElementById('state').textContent = window.__probeState();
+}, 300);
+</script>
+</body>
+</html>

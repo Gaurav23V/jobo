@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head><title>Late-mounting upload probe</title></head>
+<body style="font-family:sans-serif;max-width:700px;margin:30px auto">
+<h1>The real file input mounts a second after load</h1>
+<p>Reproduces the Westbay/Rippling failure measured on 2026-09-13. The page
+initially renders a PLACEHOLDER file input (the kind a framework mounts before
+its data arrives). A moment later the real form replaces it with the actual
+resume/cover inputs.</p>
+
+<p>An upload fired too early lands on the placeholder:
+<code>DOM.setFileInputFiles</code> returns no error, the node is connected, and
+the live form the agent is looking at holds nothing. The live log showed the
+candidate count GROWING across attempts - 3, then 2, then 6 - which is the tell
+that the page is still building itself rather than that a handle went stale.</p>
+
+<div id="host">
+  <!-- placeholder: present immediately, replaced on mount -->
+  <input type="file" data-testid="input-resume" accept=".pdf" id="placeholder">
+</div>
+
+<hr>
+<h3>Live state</h3>
+<pre id="state"></pre>
+
+<script>
+(function () {
+  window.__mounted = false;
+
+  setTimeout(function () {
+    var host = document.getElementById('host');
+    host.innerHTML = '';
+    var r = document.createElement('input');
+    r.type = 'file';
+    r.id = 'real-resume';
+    r.setAttribute('data-testid', 'input-resume');
+    r.setAttribute('accept', '.doc,.docx,.pdf');
+    var c = document.createElement('input');
+    c.type = 'file';
+    c.id = 'real-cover';
+    c.setAttribute('data-testid', 'input-cover_letter');
+    c.setAttribute('accept', '.doc,.docx,.pdf');
+    host.appendChild(r);
+    host.appendChild(c);
+    window.__mounted = true;
+  }, 1200);
+
+  window.__formState = function () {
+    var ph = document.getElementById('placeholder');
+    var real = document.getElementById('real-resume');
+    var names = function (el) {
+      return el ? Array.from(el.files || []).map(function (f) { return f.name; }) : null;
+    };
+    return JSON.stringify({
+      mounted: window.__mounted,
+      placeholder: names(ph),
+      real: names(real)
+    });
+  };
+
+  setInterval(function () {
+    document.getElementById('state').textContent = window.__formState();
+  }, 300);
+})();
+</script>
+</body>
+</html>

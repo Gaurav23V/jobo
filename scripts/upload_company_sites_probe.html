@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GHO-19 company-site upload probe</title>
+<!--
+  Shapes measured live on 2026-10-15 (see scripts/test_upload_company_sites.py):
+    ?site=turbohire   Myrtleby 1635: two hidden, attribute-identical inputs; the
+                      autofill one beside an "Autofill With Resume" button, the
+                      resume one inside div#drop-resume.
+    ?site=eightfold   Tailspin 1745: on change the widget remounts an EMPTY
+                      input and waits on a "Data Privacy Agreement" role=dialog;
+                      only "I Agree" uploads. &locked=1 disables "I Agree".
+                      As on the live site (GHO-26) the dialog is always in the
+                      DOM and opens by a class that fades opacity/visibility in,
+                      so on a hidden page it stays visibility:hidden; a hidden
+                      "Processing information" dialog spins forever beside it.
+                      &stall=1 holds the fade at its start (a 600 s delay): the
+                      headless test browser still finished it in a background
+                      tab, the live headed workers did not.
+    ?site=heron        Heron 1648: a cookie banner over a Workday start page with
+                      an "Autofill with Resume" button and no file input.
+    ?site=twins       two inputs nothing tells apart.
+-->
+<style>
+  .hidden-input { display: none; }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.3); }
+  .modal { position: fixed; top: 40px; left: 40px; width: 500px; background: #fff; padding: 12px; }
+  .panel { position: fixed; right: 0; top: 0; width: 200px; height: 100px; }
+  .fade { visibility: hidden; opacity: 0; transition: opacity .2s, visibility .2s; }
+  .fade.visible { visibility: visible; opacity: 1; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 20px; height: 20px; animation: spin 1s linear infinite; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const site = q.get("site") || "turbohire";
+const ACCEPT_TH = ".doc, .docx, .pdf, .tiff, .jpeg, .jpg, .";
+const st = { uploads: {}, chips: [], clicks: [], marketing: false };
+const root = document.getElementById("root");
+const bump = (k) => { st.uploads[k] = (st.uploads[k] || 0) + 1; };
+const chip = (name) => { const s = document.createElement("span"); s.className = "chip"; s.textContent = name; document.body.appendChild(s); st.chips.push(name); };
+
+if (site === "turbohire") {
+  root.innerHTML = `
+  <div role="dialog" aria-modal="true" class="MuiDialog-paper">
+    <h6>Data Scientist / AI Engineer</h6>
+    <div class="MuiBox-root-13 jss1148"><div class="MuiBox-root-13 jss1149">
+      <div class="MuiBox-root-13 jss1150 jss1077">
+        <p>AUTOFILL APPLICATION</p><p>Import resume to auto-fill the data</p>
+        <div class="MuiBox-root-13 jss1152">
+          <div onclick="this.querySelector('input').click()">
+            <button type="button">Autofill With Resume</button>
+            <input type="file" class="hidden-input" accept="${ACCEPT_TH}">
+          </div>
+        </div>
+      </div>
+      <p>Candidate's Personal Information</p>
+      <input type="text" value="Alex">
+      <div class="MuiBox-root-13 jss1321"><div class="MuiBox-root-13 jss1322">
+        <p>Upload Resume *</p>
+        <div id="drop-resume" class="jss1080">
+          <p>Click to upload or drop file (size &lt; 5MB) here</p>
+          <input type="file" class="hidden-input" accept="${ACCEPT_TH}">
+        </div>
+      </div></div>
+      <label><input type="checkbox"> I have read and understood TurboHire's Privacy Policy*</label>
+      <button type="button">Next</button>
+    </div></div>
+  </div>`;
+  for (const inp of root.querySelectorAll("input[type=file]")) {
+    // Slot by container, not a test attribute: an attribute would be scored.
+    const slot = inp.closest("#drop-resume") ? "resume" : "autofill";
+    inp.addEventListener("change", () => { bump(slot); if (inp.files[0]) chip(inp.files[0].name); });
+  }
+}
+
+if (site === "twins") {
+  root.innerHTML = `<div><input type="file" class="hidden-input"></div><div><input type="file" class="hidden-input"></div>`;
+}
+
+if (site === "eightfold") {
+  const locked = q.get("locked") === "1";
+  // An always-open, empty side panel: a role=dialog that is NOT a consent.
+  const panel = document.createElement("div");
+  panel.setAttribute("role", "dialog"); panel.setAttribute("aria-modal", "true"); panel.className = "panel";
+  panel.innerHTML = `<button type="button" onclick="window.__clicked('panel')">Accept</button>`;
+  document.body.appendChild(panel);
+  root.innerHTML = `<h2>Form section: Resume</h2><div class="field"><span class="upload-resume-dropzone"></span>
+    <div>Accepted file format: .pdf, .doc, .docx, .txt</div><button type="button">Select file - Upload resume</button></div>`;
+  const zone = root.querySelector(".upload-resume-dropzone");
+  const mount = () => {
+    zone.innerHTML = `<input type="file" accept=".pdf,.doc,.docx,.txt" style="display:none">`;
+    zone.firstChild.addEventListener("change", (ev) => {
+      const file = ev.target.files[0];
+      // rc-upload: uploadFiles -> reset() remounts the input, then
+      // beforeUpload awaits ensureConsent() before anything is POSTed.
+      setTimeout(mount, 10);
+      setTimeout(() => consent(file), 300);
+    });
+  };
+  const busy = document.createElement("div");
+  busy.setAttribute("role", "dialog"); busy.className = "backdrop fade";
+  busy.innerHTML = `<div class="modal">Processing information from LinkedIn <div class="spinner"></div></div>`;
+  document.body.appendChild(busy);
+  const wrap = document.createElement("div");
+  wrap.setAttribute("role", "dialog"); wrap.setAttribute("aria-modal", "true"); wrap.className = "backdrop fade privacyAgreementDialog";
+  wrap.innerHTML = `<div class="modal"><div class="dialog-header"><h3>Data Privacy Agreement</h3></div>
+    <label><input type="checkbox" id="marketing"> I agree to receiving job recommendations by email</label>
+    <p>Please review the consent below carefully. By continuing, you agree to the terms specified.</p>
+    <div><button type="button" id="cancel">Cancel</button><button type="button" id="agree" ${locked ? "disabled" : ""}>I Agree</button></div></div>`;
+  document.body.appendChild(wrap);
+  let pending = null;
+  const consent = (file) => {
+    pending = file;
+    st.vis = document.visibilityState;
+    if (q.get("stall") === "1") wrap.style.transitionDelay = "600s";
+    wrap.classList.add("visible");
+  };
+  wrap.querySelector("#cancel").onclick = () => { st.clicks.push("cancel"); wrap.classList.remove("visible"); };
+  wrap.querySelector("#agree").onclick = () => {
+    st.clicks.push("agree");
+    st.marketing = wrap.querySelector("#marketing").checked;
+    wrap.classList.remove("visible");
+    const file = pending;
+    setTimeout(() => { bump("resume"); chip(file.name); }, 200);
+  };
+  window.__busy = () => ({ shown: getComputedStyle(busy).visibility, spin: busy.getAnimations({ subtree: true }).map((a) => a.playState) });
+  window.__clicked = (k) => st.clicks.push(k);
+  mount();
+}
+
+if (site === "heron") {
+  root.innerHTML = `
+  <div id="cookie" style="position:fixed;inset:0 0 auto 0;height:120px;background:#eee;z-index:9">
+    <p>We use strictly necessary cookies. <a href="#">Cookie Notice</a></p>
+    <button type="button">Decline</button><button type="button">Accept Cookies</button></div>
+  <h2>Start Your Application</h2>
+  <button type="button" onclick="window.__noop=1">Autofill with Resume</button>
+  <button type="button">Apply Manually</button>
+  <button type="button">Use My Last Application</button>`;
+}
+
+window.__state = () => JSON.stringify(window.__busy ? { ...st, busy: window.__busy() } : st);
+</script>
+</body>
+</html>

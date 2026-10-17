@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite
+*.egg-info/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project
+credentials/
+# Personal config: everything about the candidate (see policy/personal.py,
+# ./setup.sh, personal.example/). Never commit it.
+personal/
+# Local privacy-scan terms (never commit)
+.privacy/
+# Job history and mail samples live in the private data repo
+# (scripts/backup_data.sh), not here.
+data/*

@@ -1,0 +1,3 @@
+name: jobo-browser
+version: "1.0"
+description: Jobo apply agent - trims browser snapshots to form controls, headings and status text
