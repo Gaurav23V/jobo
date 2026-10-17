@@ -524,6 +524,86 @@ def funnel(run_log: Path | None, since: str | None, until: str | None):
     click.echo(result.render("Funnel for date range"))
 
 
+@cli.command("run-report")
+@click.option(
+    "--run-log",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="The pipeline run's log (data/logs/run_*.log)",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the whole report as one JSON object")
+@click.option(
+    "--verdicts",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="pipeline_verdicts.jsonl to read (default: next to the run log)",
+)
+def run_report(run_log: Path, as_json: bool, verdicts: Path | None):
+    """Post-run triage report: verdicts, apply rate, failure clusters (GHO-44).
+
+    Read-only on jobs, except that it upserts this run's failure-ledger counts
+    (idempotent per log).
+    """
+    from module4 import run_report as rr
+
+    init_db()
+    report = rr.build_report(get_session(), run_log, verdicts_path=verdicts)
+    if as_json:
+        click.echo(json.dumps(report.to_json(), indent=2, default=str))
+    else:
+        click.echo(rr.render_text(report))
+
+
+@cli.group("ledger")
+def ledger():
+    """The failure ledger: one row per (failure signature, ATS host)."""
+
+
+@ledger.command("set")
+@click.argument("signature")
+@click.option("--host", default=None, help="ATS host; omit to update every host with this signature")
+@click.option("--bucket", type=click.Choice(["temporary", "fixable", "needs_g"]), default=None)
+@click.option("--issue", default=None, help="Paperclip identifier, e.g. GHO-57")
+@click.option("--fix-commit", default=None)
+@click.option(
+    "--status",
+    type=click.Choice(["open", "fixing", "fixed", "wont_fix", "needs_g"]),
+    default=None,
+)
+def ledger_set(signature, host, bucket, issue, fix_commit, status):
+    """Record triage or a fix for a signature (wont_fix is recorded only)."""
+    from module4 import run_report as rr
+
+    init_db()
+    try:
+        entries = rr.ledger_set(
+            get_session(), signature, host=host, bucket=bucket, issue=issue,
+            fix_commit=fix_commit, status=status,
+        )
+    except LookupError as exc:
+        raise click.UsageError(str(exc))
+    click.echo(rr.render_ledger(entries))
+
+
+@ledger.command("list")
+@click.option(
+    "--status",
+    type=click.Choice(["open", "fixing", "fixed", "wont_fix", "needs_g"]),
+    default=None,
+)
+@click.option("--json", "as_json", is_flag=True)
+def ledger_list(status, as_json):
+    """List ledger entries, most recently seen first."""
+    from module4 import run_report as rr
+
+    init_db()
+    entries = rr.ledger_list(get_session(), status)
+    if as_json:
+        click.echo(json.dumps([rr.ledger_dict(e) for e in entries], indent=2))
+    else:
+        click.echo(rr.render_ledger(entries))
+
+
 @cli.command("budget-gate")
 @click.option(
     "--stage",

@@ -10,6 +10,8 @@ cd "$ROOT"
 if [[ $# -eq 0 ]]; then
   bash "$ROOT/scripts/test_pipeline_budget_gate.sh"
   bash "$ROOT/scripts/test_collect_sources.sh"
+  # The post-run review webhook (GHO-44) against a 127.0.0.1 HTTP stub.
+  bash "$ROOT/scripts/test_review_webhook.sh"
 fi
 if [[ -x "$ROOT/.venv/bin/python" ]]; then
   exec "$ROOT/.venv/bin/python" -B "$ROOT/scripts/run_isolated_regressions.py" "$@"

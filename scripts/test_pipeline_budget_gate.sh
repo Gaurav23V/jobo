@@ -15,7 +15,10 @@ PY="$REAL_REPO/.venv/bin/python"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/repo/scripts" "$TMP/bin" "$TMP/home"
-cp "$REAL_REPO/scripts/daily_pipeline.sh" "$TMP/repo/scripts/"
+cp "$REAL_REPO/scripts/daily_pipeline.sh" "$REAL_REPO/scripts/lib_review_webhook.sh" "$TMP/repo/scripts/"
+# The temp repo has no .env, so the post-run review webhook (GHO-44) can never
+# reach the real routine from here; case 11 points it at a dead local port.
+rm -f "$TMP/repo/.env"
 # The directsdk plugin-patch preflight (GHO-10) is not under test here.
 printf '#!/bin/bash\necho "directsdk patch: present"\n' > "$TMP/repo/scripts/ensure_directsdk_patch.sh"
 
@@ -100,6 +103,7 @@ check "$([ "$(verdict 'v["overall"]')" = SKIPPED_BUDGET ] && echo yes || echo no
 check "$([ "$(verdict 'v["budget"]["utilization"]')" = 0.8 ] && echo yes || echo no)" "verdict records utilization 0.8"
 check "$([ "$(verdict 'v["budget"]["resets_at"]')" = 2026-10-15T11:00:00+00:00 ] && echo yes || echo no)" "verdict records the window reset time"
 check "$(loggrep 'BUDGET GATE (pipeline): weekly Claude usage 80% >= 50% threshold')" "run log has the gate line"
+check "$([ "$(loggrep 'review webhook')" = no ] && echo yes || echo no)" "no review webhook on SKIPPED_BUDGET"
 
 echo
 echo "2. Proceed path: 40% -> every stage runs, verdict OK with the gate result"
@@ -110,6 +114,7 @@ check "$([ "$(verdict 'v["overall"]')" = OK ] && echo yes || echo no)" "verdict 
 check "$([ "$(verdict 'v["budget"]["decision"]')" = PROCEED ] && echo yes || echo no)" "verdict carries the last gate decision (PROCEED)"
 check "$([ "$(cat "$TMP/counter")" = 2 ] && echo yes || echo no)" "gate checked twice (start + before triage)"
 check "$(loggrep '5h session usage 22% (resets 2026-10-15T16:29:59+00:00)')" "run log has the 5h session usage (GHO-22)"
+check "$(loggrep 'review webhook: skipped (JOBO_REVIEW_WEBHOOK_URL/SECRET not set in .env)')" "no .env -> review webhook skipped, one log line"
 check "$([ "$(verdict 'v["budget"]["session_utilization"]')" = 0.22 ] && echo yes || echo no)" "verdict records the 5h session utilization"
 
 echo
@@ -133,6 +138,7 @@ check "$([ "$(stages)" = "collector collect-jobfound enrich prefilter" ] && echo
 check "$([ "$(verdict 'v["overall"]')" = STOPPED_BUDGET ] && echo yes || echo no)" "verdict overall STOPPED_BUDGET"
 check "$([ "$(verdict '",".join(s["stage"]+":"+s["verdict"] for s in v["stages"])')" = "collector:OK,jobfound:OK,enrich:OK,prefilter:OK,triage:SKIPPED_BUDGET,apply:SKIPPED_BUDGET" ] && echo yes || echo no)" "stage verdicts show triage/apply skipped for budget"
 check "$([ "$(verdict 'v["budget"]["gate"]')" = triage ] && echo yes || echo no)" "verdict records the triage gate"
+check "$(loggrep 'review webhook: skipped')" "STOPPED_BUDGET reaches the review webhook"
 
 echo
 echo "6. Threshold override: JOBO_BUDGET_THRESHOLD=0.5 at 56% -> skip"
@@ -160,6 +166,26 @@ check "$([ "$RC" -eq 0 ] && [ -z "$(stages)" ] && echo yes || echo no)" "exit 0,
 check "$([ "$(verdict 'v["overall"]')" = SKIPPED_BUDGET ] && echo yes || echo no)" "verdict overall SKIPPED_BUDGET"
 check "$([ "$(verdict 'v["budget"]["decision"]')" = SKIP_SESSION ] && echo yes || echo no)" "verdict decision SKIP_SESSION"
 check "$(loggrep '5h session usage 31% >= 30% session line')" "run log names the session line"
+
+echo
+echo "11. Review webhook failing (dead local port) never changes the exit code or verdict"
+printf 'JOBO_REVIEW_WEBHOOK_URL=http://127.0.0.1:1/hook\nJOBO_REVIEW_WEBHOOK_SECRET=test-only\n' > "$TMP/repo/.env"
+run_pipeline "0.40"
+rm -f "$TMP/repo/.env"
+check "$([ "$RC" -eq 0 ] && [ "$(verdict 'v["overall"]')" = OK ] && echo yes || echo no)" "exit 0 and verdict OK (rc=$RC)"
+check "$(loggrep 'review webhook: FAILED (curl exit 7')" "the failure is logged once"
+check "$([ "$(grep -c 'review webhook' "$RUNLOG")" = 1 ] && echo yes || echo no)" "exactly one webhook log line"
+
+echo
+echo "12. SKIPPED_OVERLAP (lock held) never fires the review webhook, even with a .env"
+printf 'JOBO_REVIEW_WEBHOOK_URL=http://127.0.0.1:1/hook\nJOBO_REVIEW_WEBHOOK_SECRET=test-only\n' > "$TMP/repo/.env"
+exec 8>"$TMP/pipeline.lock"
+flock 8
+run_pipeline "0.40"
+exec 8>&-
+rm -f "$TMP/repo/.env"
+check "$([ "$(verdict 'v["overall"]')" = SKIPPED_OVERLAP ] && [ -z "$(stages)" ] && echo yes || echo no)" "verdict SKIPPED_OVERLAP, no stage ran"
+check "$([ "$(loggrep 'review webhook')" = no ] && echo yes || echo no)" "no review webhook on SKIPPED_OVERLAP"
 
 echo
 echo "9. Unknown script argument is refused before anything runs"
