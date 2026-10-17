@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Test module4.run_report: failure signatures, clustering, the failure ledger (GHO-44).
 
-The reason strings in section 1 follow real module4_last_status rows in
-data/jobs.db (2026-10-18) word for word in their failure wording; only the
-employer names, hosts, emails and ids are swapped for fictional ones. Each
-real failure is given twice with different employer/host/number details,
-because the point of a signature is that both copies get the same key.
+The reason strings in section 1 are paraphrases of the most common failure
+shapes among the stuck rows in data/jobs.db (2026-10-18), with fictional
+employers, hosts, emails and numbers. Each shape is given twice, worded
+differently, because the point of a signature is that both get the same key.
 
 Run: bash scripts/run_regression_tests.sh test_run_report
 """
@@ -37,68 +36,68 @@ def check(label: str, ok: bool, note: str = "") -> None:
 # (expected signature, bucket, [(status, company), (status, company)])
 REAL_SHAPES = [
     ("captcha:turnstile", "fixable", [
-        ("captcha_failed:Treyco's apply modal is stuck at \"Reading your resume...\" because its "
-         "Cloudflare Turnstile widget hangs and errors (300030) in an infinite retry loop", "Treyco"),
-        ("captcha_failed:Osprey's Apply modal hangs indefinitely on Cloudflare Turnstile (error 600010, "
-         "\"Turnstile Widget seem to have hung\") during the resume-parse step", "Northwind Labs"),
+        ("captcha_failed:Treyco's apply dialog never gets past \"Parsing resume...\"; the Cloudflare "
+         "Turnstile check keeps failing with code 300030", "Treyco"),
+        ("captcha_failed:Osprey's Apply popup freezes on a Cloudflare Turnstile challenge (code 600010, "
+         "\"widget appears hung\") while it reads the CV", "Northwind Labs"),
     ]),
     ("account:exists_password", "needs_g", [
-        ("stuck:Northwind's Avature portal (careers.northwind.com) has a pre-existing account for "
-         "someone@example.com; password reset rejected the standard reset password", "Northwind"),
-        ("stuck:Treyco SuccessFactors (career44.sapsf.com) account for other@example.org already exists "
-         "from a prior attempt (blocking new registration)", "Treyco Pvt Ltd"),
+        ("stuck:Northwind's Avature site (careers.northwind.com) already holds a pre-existing account for "
+         "someone@example.com and the reset password was refused", "Northwind"),
+        ("stuck:Treyco SuccessFactors (career9.sapsf.com): an account for other@example.org already exists "
+         "from an earlier try, so registering again fails", "Treyco Pvt Ltd"),
     ]),
     ("account:create_noop", "fixable", [
-        ("stuck:Workday account creation silently fails - Create Account and Forgot Password buttons "
-         "produce no page change, no error, and no navigation", "Northwind"),
-        ("stuck:Treyco's Workday application portal (treyco.wd5.myworkdayjobs.com) is stuck at Create "
-         "Account/Sign In step 1 of 7 - the Create Account button does nothing", "Treyco"),
+        ("stuck:Creating the Workday account silently fails - pressing Create Account changes nothing, "
+         "shows no error and does not navigate", "Northwind"),
+        ("stuck:Treyco Workday (treyco.wd5.myworkdayjobs.com) is stuck at Create Account on page 1 of 6; "
+         "clicking it gives no response", "Treyco"),
     ]),
     ("personal:id_or_dob", "needs_g", [
-        ("stuck:Northwind Bank application step 2 mandates PAN (Indian tax ID) and Date of Birth, "
-         "neither of which is in the candidate facts", "Northwind Bank"),
-        ("stuck:Treyco's application form (careers.treyco.com) requires PAN number and Date of Birth as "
-         "mandatory fields on the \"My information\" step", "Treyco"),
+        ("stuck:Northwind Bank's second step makes PAN and Date of Birth compulsory; the candidate facts "
+         "have neither", "Northwind Bank"),
+        ("stuck:Treyco's form (careers.treyco.com) will not continue without a PAN number and a date of "
+         "birth on the personal details page", "Treyco"),
     ]),
     ("personal:photo", "needs_g", [
-        ("stuck:Northwind Avature form requires a mandatory Candidate Photo (passport-style photograph) "
-         "upload field; no photo asset exists", "Northwind"),
-        ("stuck:Workday step 5 of 7 requires a mandatory \"Photo Upload\" (a current headshot of the "
-         "candidate) which is not available", "Treyco"),
+        ("stuck:Northwind Avature form has a required Candidate Photo field (passport photograph) and the "
+         "task has no photo to give it", "Northwind"),
+        ("stuck:Workday page 4 of 6 insists on a \"Profile Photo\" headshot of the applicant, which the "
+         "pipeline does not have", "Treyco"),
     ]),
     ("signin:oauth_only", "needs_g", [
-        ("stuck:Apply flow routes to a Google Form requiring Google Account sign-in only, no "
-         "email/password option available", "Northwind"),
-        # The employer's own name is an identity provider: company stripping
-        # must not erase "google" from "google account".
-        ("stuck:Google Careers apply flow forces sign-in/account creation via accounts.google.com Google "
-         "Account, with no email/password ATS alternative", "Google"),
+        ("stuck:The apply link is a Google Form that only opens for a signed-in Google Account; there is "
+         "no email/password route", "Northwind"),
+        # The employer's own name holds an identity provider's: company
+        # stripping must not erase "google" from "google account".
+        ("stuck:Careers site makes you sign in with a Google Account (accounts.google.com) and offers no "
+         "other way to apply", "Google Cloud Partners Pvt Ltd"),
     ]),
     ("agent:step_budget", "fixable", [
-        ("stuck:ran out of step budget (100 model steps) mid-form, before submitting", None),
-        ("stuck:Ran out of tool-call iterations after uploading resume and filling personal info on "
-         "Treyco's Workday-style form", "Treyco"),
+        ("stuck:ran out of step budget (80 model steps) half way through the form", None),
+        ("stuck:Ran out of tool-call iterations on Treyco's Workday-like form after the resume step",
+         "Treyco"),
     ]),
     ("upload:failed", "fixable", [
-        ("stuck:Eightfold.ai Resume dropzone upload failed on all 4 NEED_UPLOAD attempts", "Northwind"),
-        ("stuck:Resume upload on Treyco's Phenom/Taleo apply form fails all 3 NEED_UPLOAD attempts "
-         "(file inputs present in DOM but undetected by the uploader)", "Treyco"),
+        ("stuck:Eightfold resume dropzone rejected the file on every one of 4 NEED_UPLOAD tries", "Northwind"),
+        ("stuck:Treyco's Phenom form never registers the resume upload after 3 NEED_UPLOAD rounds (the "
+         "file input exists but the uploader cannot see it)", "Treyco"),
     ]),
     ("widget:value_not_kept", "fixable", [
-        ("stuck:Workday \"How Did You Hear About Us?\" required combobox (My Information step) will not "
-         "retain a selected value through blur/Save", "Northwind"),
-        ("stuck:Shine.com's \"Current Salary\" react-dropdown on this job's apply form will not commit "
-         "any selection (tried NEED_FIELD x3)", "Treyco"),
+        ("stuck:Workday \"Source\" required combobox will not retain the chosen option once the field "
+         "loses focus", "Northwind"),
+        ("stuck:Shine.com's \"Notice Period\" react-dropdown will not commit a choice (NEED_FIELD x2)",
+         "Treyco"),
     ]),
     ("no_web_form", "fixable", [
-        ("stuck:Job posting has no web application form, only a mailto: link requiring manual email "
-         "composition with resume attachment", "Northwind"),
-        ("stuck:Treyco.ai posting has no web application form, only \"Apply via email\" "
-         "(mailto:careers@treyco.ai)", "Treyco"),
+        ("stuck:The posting has no web application form, just a mailto: address to email a CV to",
+         "Northwind"),
+        ("stuck:Treyco.ai only says \"Apply via email\" (mailto:jobs@treyco.ai); there is nothing to fill",
+         "Treyco"),
     ]),
     ("net:http2", "temporary", [
-        ("stuck:Company site careers.northwind.co.in returns ERR_HTTP2_PROTOCOL_ERROR in the browser on "
-         "every attempt", "Northwind"),
+        ("stuck:careers.northwind.co.in fails with ERR_HTTP2_PROTOCOL_ERROR in Chromium every time",
+         "Northwind"),
         ("stuck:careers.treyco.com: net::ERR_HTTP2_PROTOCOL_ERROR on load (3 tries)", "Treyco"),
     ]),
     ("net:dns", "temporary", [
@@ -110,11 +109,34 @@ REAL_SHAPES = [
         ("stuck:agent timed out after 900s (no verdict printed)", "Treyco"),
     ]),
     ("captcha:hcaptcha", "fixable", [
-        ("captcha_failed:Lever form fully completed and resume attached, but submit is gated by an "
-         "hCaptcha image-grid challenge", "Northwind"),
-        ("captcha_failed:hCaptcha \"click the two ends of the line\" visual challenge (rendered inside a "
-         "cross-origin enclave iframe on jobs.lever.co) blocked submit", "Treyco"),
+        ("captcha_failed:Lever form complete with resume attached, then Submit raised an hCaptcha image "
+         "grid", "Northwind"),
+        ("captcha_failed:an hCaptcha \"drag the piece into place\" puzzle (in a cross-origin iframe on "
+         "jobs.lever.co) stopped the submit", "Treyco"),
     ]),
+]
+
+# Verbatim module4_last_status values from data/jobs.db (2026-10-18), chosen
+# because they name no employer, person, email or tenant host.
+VERBATIM = [
+    ("timeout", "stuck:agent timed out after 480s (no verdict printed)"),
+    ("agent:step_budget", "stuck:ran out of step budget (100 model steps) mid-form, before submitting"),
+    ("no_web_form", "stuck:Job posting has no web application form, only a mailto: link requiring manual "
+     "email composition with resume attachment \u2014 no mechanism exists to submit via browser automation"),
+    ("signin:oauth_only", "stuck:Apply flow routes to a Google Form requiring Google Account sign-in only, "
+     "no email/password option available; confirmed blocker on prior attempt, not retryable."),
+    ("widget:value_not_kept", "stuck:Workday \"How Did You Hear About Us?\" required combobox (My Information "
+     "step) will not retain a selected value through blur/Save on repeated manual and deterministic "
+     "attempts, blocking all progress before the resume upload step"),
+    ("personal:disclosures", "stuck:Required conflict-of-interest, family-relationship, restrictive-agreement, "
+     "and outside-employment disclosures need answers not provided in the candidate facts."),
+    ("signin:linkedin", "stuck:LinkedIn job requires sign-in to view/apply, and no LinkedIn credentials are "
+     "saved in the vault; cannot proceed past the login wall."),
+    ("captcha:hcaptcha", "captcha_failed:Lever/hCaptcha presented an image-puzzle challenge (\"click all icons "
+     "that show multiple times\") after clicking Submit Application; all required form fields were filled "
+     "correctly but the hCaptcha visual challenge could not be reliably solved"),
+    ("captcha:turnstile", "stuck:Company career-page form's Cloudflare Turnstile widget errors out (600010) "
+     "and never issues a token, permanently disabling the Submit button regardles"),
 ]
 
 
@@ -124,6 +146,10 @@ def section_signatures() -> None:
         got = [rr.signature_for(s, c) for s, c in pairs]
         check(f"{expected}: both copies", got == [expected, expected], f"got {got}")
         check(f"{expected}: suggested bucket {bucket}", rr.suggested_bucket(expected) == bucket)
+
+    for expected, status in VERBATIM:
+        got = rr.signature_for(status, None)
+        check(f"verbatim DB row -> {expected}", got == expected, f"got {got}")
 
     norm = rr.normalise_reason(
         "stuck:Northwind's portal (careers.northwind.com, https://x.northwind.com/apply?id=42) "

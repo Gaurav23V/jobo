@@ -73,7 +73,8 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
          r"oauth|google (?:account|form)|apple (?:id|account)|microsoft account|sign[- ]?in with google"
          r"|multi[- ]factor|\bmfa\b|trusted[- ]device|push approval"),
         ("account:create_noop", "fixable",
-         r"create account[^.]{0,80}(?:no (?:page )?change|no response|no navigation|nothing happen|silent|no-?op|no re|loops?)"
+         r"(?:create account|creat\w* (?:the |a )?(?:\w+ )?account)[^.]{0,80}"
+         r"(?:no (?:page )?change|changes nothing|does nothing|no response|no navigation|nothing happen|silent|no-?op|no re|loops?)"
          r"|account creation silently|stuck at create account|fails? to create[^.]{0,30}account"),
         ("account:exists_password", "needs_g",
          r"account (?:already )?exists|already (?:has|have) an account|(?<!no )existing account|pre-existing account"
@@ -98,7 +99,7 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         ("site:broken", "temporary",
          r"js exceptions?|javascript error|infinite (?:loading|spinner)|fails to load|unresponsive|blank page"),
         ("widget:value_not_kept", "fixable",
-         r"will not (?:commit|retain|register|accept|keep)|won t (?:commit|retain|select)|never registers"
+         r"will not (?:commit|retain|register|accept|keep)|won t (?:commit|retain|select)"
          r"|not retain|invalid input|dropdown|combobox|autocomplete|radio"),
         ("upload:failed", "fixable", r"upload|dropzone|file input|file[- ]picker"),
         ("timeout", "temporary", r"timed out|timeout"),
@@ -106,8 +107,8 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
     )
 )
 # Identity providers and ATS vendors: a reason naming them is about the wall,
-# not the employer, so they survive company stripping (an employer "Google"
-# must still read "requires a google account").
+# not the employer, so they survive company stripping even when the employer's
+# name contains one ("requires a google account" must keep "google").
 _KEEP_WORDS = frozenset({
     "google", "apple", "microsoft", "linkedin", "facebook", "github", "oracle",
     "workday", "greenhouse", "lever", "ashby", "avature", "successfactors",
