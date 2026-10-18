@@ -104,6 +104,14 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         ("widget:value_not_kept", "fixable",
          r"will not (?:commit|retain|register|accept|keep)|won t (?:commit|retain|select)"
          r"|not retain|invalid input|dropdown|combobox|autocomplete|radio"),
+        # A required answer the site's own list or catalogue does not hold (the
+        # candidate's school on Ashby's school search). Above uploads, because
+        # these reasons go on to say the resume was uploaded fine.
+        ("field:no_true_option", "needs_g",
+         r"(?:school|college|university|institution|degree|discipline|major|field of study)\b.{0,80}?"
+         r"(?:no (?:\w+ ){0,2}(?:entry|entries|match|matches|option|options|result|results)\b"
+         r"|not (?:in|listed|offered|found)\b|does not (?:exist|list|contain|offer)"
+         r"|(?:has|have|offers?) no\b|no true\b)"),
         ("upload:failed", "fixable", r"upload|dropzone|file input|file[- ]picker"),
         ("timeout", "temporary", r"timed out|timeout"),
         ("agent:no_verdict", "fixable", r"no verdict"),
