@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ashby application form (School typeahead replica)</title>
+<!--
+Local replica of the parts of an Ashby application form that beat job1923
+(run 2026-10-18 22:00, GHO-57). Shapes copied from the live form:
+
+  * School and Location are `input[role=combobox]` search typeaheads with no
+    backing <select>. Typing sends a debounced catalogue search; the results
+    render in a portalled `[role=listbox]` named by the input's aria-controls,
+    and each result shows "Name / Country / domain" on three lines.
+  * The catalogue is fuzzy: a school it does not hold still returns ten other
+    schools. It has no "Other" / "not listed" entry.
+  * A result is committed only by clicking it. Typed text that was never
+    committed is wiped when the input loses focus.
+  * The form also has always-visible radio groups (Degree, Gender) whose
+    choices carry an "Other" label with `-option` in the class name, and
+    yes/no buttons.
+
+Query string: ?cat=plain (default) | alias | escape | nocommit
+  plain    - no true school, no escape entry
+  alias    - holds one of the candidate's alternative school names
+  escape   - holds an "Other" entry, but no true school
+  nocommit - clicking a result does nothing (commit never happens)
+-->
+<style>
+  body { font-family: sans-serif; margin: 20px; width: 900px; }
+  ._fieldEntry { margin: 14px 0; }
+  ._inputContainer { position: relative; }
+  input[type=text], input:not([type]) { width: 500px; padding: 6px; }
+  [role=listbox] { position: absolute; background: #fff; border: 1px solid #888; width: 520px; z-index: 5; }
+  [role=option] { padding: 4px 8px; cursor: pointer; }
+  [role=option] div:nth-child(n+2) { font-size: 11px; color: #666; }
+  ._option { display: inline-block; margin-right: 12px; }
+</style>
+</head>
+<body>
+<form id="app" onsubmit="return false">
+  <div class="_fieldEntry ashby-application-form-field-entry" data-field-path="_systemfield_name">
+    <label class="ashby-application-form-question-title" for="_systemfield_name">Full Name</label>
+    <input id="_systemfield_name" name="_systemfield_name" type="text">
+  </div>
+
+  <div class="_fieldEntry ashby-application-form-field-entry" data-field-path="_systemfield_location">
+    <label class="_required ashby-application-form-question-title" for="_systemfield_location">Location</label>
+    <div class="ashby-application-form-question-description"><p>City, State, and Country</p></div>
+    <div class="_inputContainer_d7ago_28">
+      <input class="_input_d7ago_28 ashby-application-form-input-autocomplete" data-kind="location"
+             placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false"
+             aria-haspopup="listbox" role="combobox" value="">
+    </div>
+  </div>
+
+  <div class="_fieldEntry ashby-application-form-field-entry" data-field-path="_systemfield_education_history">
+    <div class="ashby-application-form-question-title">School Name</div>
+    <div class="ashby-application-form-question-description"><p>For most recent or in progress degree.</p></div>
+    <div class="_stack_b7xpf_1 _vertical_b7xpf_4">
+      <label class="_required _educationLabel ashby-application-form-question-title"
+             for="_systemfield_education_history-school">School</label>
+      <div class="_inputContainer_d7ago_28">
+        <input class="_input_d7ago_28 ashby-application-form-input-autocomplete" data-kind="school"
+               placeholder="Search schools..." aria-autocomplete="list" aria-expanded="false"
+               aria-haspopup="listbox" role="combobox" value="">
+      </div>
+    </div>
+  </div>
+
+  <div class="_fieldEntry ashby-application-form-field-entry">
+    <div class="ashby-application-form-question-title">Degree</div>
+    <div class="ashby-application-form-input-radio-group" id="degree-group">
+      <div class="_option_1258i_34 ashby-application-form-input-radio-group-option"><input type="radio" name="degree" value="Bachelor's Degree" class="ashby-application-form-input-radio-group-option-radio" id="deg-b"><label class="_label_1258i_42 ashby-application-form-input-radio-group-option-label" for="deg-b">Bachelor's Degree</label></div>
+      <div class="_option_1258i_34 ashby-application-form-input-radio-group-option"><input type="radio" name="degree" value="Other" class="ashby-application-form-input-radio-group-option-radio" id="deg-o"><label class="_label_1258i_42 ashby-application-form-input-radio-group-option-label" for="deg-o">Other</label></div>
+    </div>
+  </div>
+
+  <div class="_fieldEntry ashby-application-form-field-entry">
+    <div class="ashby-application-form-question-title">Are you authorized to work in the US?</div>
+    <button type="button" class="_container_pjyt6_1 _option_1svni_32 ashby-application-form-yes-no-option">Yes</button>
+    <button type="button" class="_container_pjyt6_1 _option_1svni_32 ashby-application-form-yes-no-option">No</button>
+  </div>
+
+  <div class="_fieldEntry ashby-application-form-field-entry">
+    <div class="ashby-application-form-question-title">Gender</div>
+    <div class="ashby-application-form-input-radio-group" id="gender-group">
+      <div class="_option_1258i_34 ashby-application-form-input-radio-group-option"><input type="radio" name="gender" value="Female" class="ashby-application-form-input-radio-group-option-radio" id="g-f"><label class="_label_1258i_42 ashby-application-form-input-radio-group-option-label" for="g-f">Female</label></div>
+      <div class="_option_1258i_34 ashby-application-form-input-radio-group-option"><input type="radio" name="gender" value="Other" class="ashby-application-form-input-radio-group-option-radio" id="g-o"><label class="_label_1258i_42 ashby-application-form-input-radio-group-option-label" for="g-o">Other</label></div>
+    </div>
+  </div>
+</form>
+
+<script>
+const CAT = new URLSearchParams(location.search).get('cat') || 'plain';
+// Fictional catalogue. Several entries share most of the candidate's school
+// name (another campus, the same city) and must never be chosen for it.
+const SCHOOLS = [
+  ['Lakeside Institute of Information Technology Riverton', 'India', 'liitr.example'],
+  ['Lakeside Institute of Information Technology, Oakdale', 'India', 'liito.example'],
+  ['Lakeside Institute of Technology Springfield', 'India', 'lits.example'],
+  ['University of Springfield', 'India', 'uos.example'],
+  ['Springfield Open University', 'India', 'sou.example'],
+  ['Lakeview Institute of Information Technology', 'India', 'lviit.example'],
+  ['International Institute of Information Technology, Shelbyville', 'India', 'intl-shelbyville.example'],
+  ['Illinois Institute of Technology', 'United States', 'iit.edu'],
+  ['Ostbayerische Technische Hochschule Amberg-Weiden', 'Germany', 'oth-aw.de'],
+  ['Olivet University', 'United States', 'olivetuniversity.edu'],
+  ['Long Island University', 'United States', 'liu.edu'],
+  ['The London Interdisciplinary School', 'United Kingdom', 'lis.ac.uk'],
+];
+if (CAT === 'alias') SCHOOLS.push(['Lakeside Institute of Information Technology, Springfield', 'India', 'liit.example']);
+if (CAT === 'escape') SCHOOLS.push(['Other', '', '']);
+const PLACES = [
+  ['Springfield, Illinois, United States'], ['Springfield, Missouri, United States'],
+  ['Riverton, Wyoming, United States'],
+];
+window.searchLog = [];
+const toks = s => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+// Fuzzy like Ashby's: anything sharing a token (or a 3-letter prefix of one)
+// comes back, best overlap first, ten at most. An unknown school still
+// returns a full page of OTHER schools.
+function search(list, q) {
+  const qt = toks(q);
+  const scored = list.map(row => {
+    const rt = toks(row.join(' '));
+    let s = 0;
+    for (const t of qt) for (const r of rt) {
+      if (r === t) s += 3; else if (t.length >= 3 && r.startsWith(t.slice(0, 3))) s += 1;
+    }
+    return [s, row];
+  }).filter(p => p[0] > 0);
+  scored.sort((a, b) => b[0] - a[0]);
+  let rows = scored.map(p => p[1]);
+  if (list === SCHOOLS && rows.length < 10) {
+    for (const r of SCHOOLS) if (!rows.includes(r)) rows.push(r);
+  }
+  return rows.slice(0, 10);
+}
+
+let seq = 0;
+document.querySelectorAll('input[role=combobox]').forEach(input => {
+  const kind = input.dataset.kind;
+  let committed = '', timer = null, lb = null;
+  const close = () => {
+    if (lb) { lb.remove(); lb = null; }
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-controls');
+  };
+  const open = rows => {
+    close();
+    lb = document.createElement('div');
+    lb.id = ':r' + (++seq) + ':';
+    lb.setAttribute('role', 'listbox');
+    lb.className = '_floatingContainer_d7ago_103';
+    const r = input.getBoundingClientRect();
+    lb.style.left = (r.left + window.scrollX) + 'px';
+    lb.style.top = (r.bottom + window.scrollY) + 'px';
+    for (const row of rows) {
+      const o = document.createElement('div');
+      o.setAttribute('role', 'option');
+      o.className = '_result_d7ago_107 ashby-application-form-input-autocomplete-popup-result';
+      for (const part of row) if (part) {
+        const d = document.createElement('div'); d.textContent = part; o.appendChild(d);
+      }
+      o.addEventListener('mousedown', e => e.preventDefault());  // keep focus, like Ashby
+      o.addEventListener('click', () => {
+        if (CAT === 'nocommit') return;
+        committed = row[0];
+        input.value = committed;
+        close();
+      });
+      lb.appendChild(o);
+    }
+    document.body.appendChild(lb);
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-controls', lb.id);
+  };
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value;
+    if (!q.trim()) { close(); return; }
+    // Debounce, then a catalogue round-trip.
+    timer = setTimeout(() => {
+      window.searchLog.push(kind + ':' + q);
+      setTimeout(() => {
+        if (input.value !== q) return;
+        const rows = search(kind === 'school' ? SCHOOLS : PLACES, q);
+        if (rows.length) open(rows); else close();
+      }, 450);
+    }, 250);
+  });
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  // Uncommitted typing does not survive leaving the field.
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (document.activeElement === input) return;
+      clearTimeout(timer);
+      close();
+      if (input.value !== committed) input.value = committed;
+    }, 100);
+  });
+  window['committed_' + kind] = () => committed;
+});
+</script>
+</body>
+</html>

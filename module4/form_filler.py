@@ -77,6 +77,8 @@ except ImportError:  # pragma: no cover
     websocket = None  # type: ignore[assignment]
 
 WS_TIMEOUT_SEC = 20
+# Wall-clock cap on searching a typeahead for alternative names of one value.
+TYPEAHEAD_WALK_SEC = 60
 
 
 def _norm_py(s: str) -> str:
@@ -313,7 +315,7 @@ __COLLECT__
 # set it the right way for its widget type, notify the framework, read it
 # back. Returning a JSON verdict keeps the Python side simple.
 _SET_FIELD_JS = r"""
-(async function(fieldHint, wantValue, strict, byIndex, expectSig) {
+(async function(fieldHint, wantValue, strict, byIndex, expectSig, exactOption) {
   const out = {ok: false, strategy: null, matched: null, readback: null, note: null,
                candidates: [], sig: null, stale: false, reverted: false,
                noMatch: false, emptyRemote: false, availableOptions: null};
@@ -875,21 +877,47 @@ __COLLECT__
 
   // Find the listbox options the widget rendered, wherever it put them
   // (react-select portals them to <body>, outside the field's own container).
+  //
+  // Only THIS widget's options. A combobox that names its listbox
+  // (aria-controls / aria-owns, set by Ashby and react-select while open) is
+  // read from that listbox alone. Without that, `[class*="-option"]` also
+  // matched every radio and checkbox choice on the page: on Ashby (job1923,
+  // 2026-10-18) the Degree and Gender groups' always-visible "Other" labels
+  // were offered as School and Location options, the setter clicked a
+  // different field's radio, read its own typed "Other" back out of the input
+  // and reported both fields SET while the form held nothing.
   const findOptions = () => {
     const sels = ['[role=option]', '.select__option', '[class*="-option"]',
                   '.select2-results__option', '.chosen-results li'];
+    const shown = o => { const r = o.getBoundingClientRect(); return r.width > 0 || r.height > 0; };
+    const owned = ((el.getAttribute('aria-controls') || '') + ' ' +
+                   (el.getAttribute('aria-owns') || '')).split(/\s+/).filter(Boolean)
+                  .map(id => document.getElementById(id)).filter(Boolean);
+    const roots = owned.length ? owned : [document];
     const seenO = new Set(), found = [];
-    for (const s of sels) {
-      document.querySelectorAll(s).forEach(o => {
-        if (seenO.has(o)) return;
-        const r = o.getBoundingClientRect();
-        if (r.width === 0 && r.height === 0) return;   // not actually shown
-        seenO.add(o);
-        found.push(o);
-      });
+    for (const root of roots) {
+      for (const s of sels) {
+        root.querySelectorAll(s).forEach(o => {
+          if (seenO.has(o) || !shown(o)) return;
+          // A choice of some other control, not a dropdown result.
+          // (A menu rendered inside the input's own <label> is still its menu.)
+          const lab = o.closest('label');
+          if (o.matches('label, button, input, [role=radio], [role=checkbox]') ||
+              o.closest('[role=radiogroup], [role=radio], [role=checkbox]') ||
+              (lab && lab.querySelector('input[type=radio], input[type=checkbox]')) ||
+              o.querySelector('input[type=radio], input[type=checkbox]') ||
+              /radio|checkbox/i.test((o.className || '').toString())) return;
+          seenO.add(o);
+          found.push(o);
+        });
+      }
     }
     return found;
   };
+  // A catalogue result can carry detail lines under its name (Ashby's school
+  // search shows "Name / Country / domain"); the first line is the value.
+  const optLabel = (o) => ((o.innerText || o.textContent || '').split('\n')
+                             .map(s => s.trim()).filter(Boolean)[0] || '');
 
   // Locate a backing hidden <select> now, because it decides WHICH strategy
   // owns this widget. A select2-style control with a real backing select is
@@ -934,18 +962,38 @@ __COLLECT__
     realClick(opener);
     await sleep(120);
     typeInto(el, want);
-    // Remote-search widgets need time to fetch; poll rather than guess.
-    let opts = [];
-    for (let i = 0; i < 14; i++) {
+    // Remote-search widgets need time to fetch; poll rather than guess. Take
+    // the list once it holds an exact hit or has stopped changing: Ashby's
+    // location search answers after ~3s, and the first non-empty list is not
+    // necessarily the answer to this query.
+    let opts = [], lastSig = null, stable = 0;
+    for (let i = 0; i < 28; i++) {
       await sleep(160);
       opts = findOptions();
-      if (opts.length) break;
+      if (!opts.length) { lastSig = null; stable = 0; continue; }
+      if (opts.some(o => norm(optLabel(o)) === wantN ||
+                         norm(o.innerText || o.textContent || '') === wantN)) break;
+      const sig = opts.map(optLabel).join('|');
+      stable = sig === lastSig ? stable + 1 : 0;
+      lastSig = sig;
+      if (stable >= 4) break;
     }
+    // Exact names only for an institution (or when the caller is walking
+    // alternative names): a prefix rule turns "Indian Institute of Information
+    // Technology" into the first campus the catalogue lists, which is a
+    // different school on a real application.
+    const exactOnly = !!exactOption ||
+      /\b(school|college|university|institution|institute)\b/.test(
+        norm((target.label || '') + ' ' + (target.meta || '') + ' ' +
+             (el.getAttribute('placeholder') || '')));
     if (opts.length) {
       const score = (o) => {
-        const t = norm(o.innerText || o.textContent || '');
-        if (!t) return -1;
-        if (t === wantN) return 3;
+        const full = norm(o.innerText || o.textContent || '');
+        const first = norm(optLabel(o));
+        if (!full) return -1;
+        if (full === wantN || first === wantN) return 3;
+        if (exactOnly) return -1;
+        const t = full;
         if (t.startsWith(wantN) || wantN.startsWith(t)) return 2;
         if (t.includes(wantN) || wantN.includes(t)) return 1;
         return -1;
@@ -958,6 +1006,11 @@ __COLLECT__
         realClick(best);
         out.strategy = 'react-select-driven';
         out.matched = target.meta;
+        // A typeahead that shows its value in the input itself (Ashby) still
+        // holds our typed query when the click did not commit, and wipes it on
+        // blur. Blur first so the readback sees committed state, not our typing.
+        await sleep(120);
+        el.blur();
         // Read the widget's DISPLAYED value, which is where these widgets show
         // their committed state (the input itself goes blank after selection).
         return await finish(() => {
@@ -1001,6 +1054,9 @@ __COLLECT__
             '[class*="singleValue"], [class*="multiValue"], .select2-selection__rendered');
           const shown = single ? (single.innerText || single.textContent || '').trim() : '';
           if (shown) return shown;
+          // Its own menu still open after the pick means nothing committed;
+          // the input then holds only our query.
+          if (el.getAttribute('aria-expanded') === 'true') return '';
           if (el.value) return el.value;
           // Last resort: the container's own text, minus the placeholder.
           const boxText = box ? (box.innerText || '').trim() : '';
@@ -1015,12 +1071,15 @@ __COLLECT__
       // "School, Degree and Discipline share state, typing in one clears the
       // others", which was our own leftover text, not their bug. Always restore
       // the widget to the state we found it in before reporting failure.
+      // Read the labels while the listbox is still rendered: once closed,
+      // innerText loses the line breaks that separate name from detail.
+      out.availableOptions = opts.map(optLabel).filter(Boolean);
       abandonTyping();
       out.noMatch = true;
-      out.availableOptions = opts.map(o => (o.innerText || o.textContent || '').trim())
-                                 .filter(Boolean);
+      out.typeahead = true;
       out.note = 'the dropdown opened but no option matched ' + JSON.stringify(want) +
-                 '. The site offers: ' + out.availableOptions.join(' / ');
+                 (exactOnly ? ' exactly' : '') +
+                 '. Searching it offered: ' + out.availableOptions.join(' / ');
       return JSON.stringify(out);
     }
     // No options appeared at all. For a react-style combobox that means the
@@ -1057,6 +1116,7 @@ __COLLECT__
       }
     } catch (e) {}
     out.noMatch = true;
+    out.typeahead = true;
     out.emptyRemote = true;
     out.availableOptions = [];
     out.reverted = true;
@@ -1288,6 +1348,11 @@ class SetFieldResult:
     available_options: list[str] = field(default_factory=list)
     # Set when the answer book substituted an honest alternative phrasing.
     substituted: str = ""
+    # A search-as-you-type widget: `available_options` are only the results
+    # for the last query, not the field's whole vocabulary.
+    typeahead: bool = False
+    # Every alternative name the setter searched for before giving up.
+    searched: list[str] = field(default_factory=list)
     # The listed control was found again at this new number (rows inserted
     # above it since the listing); 0 when it was where it was listed.
     moved_to: int = 0
@@ -1312,6 +1377,22 @@ class SetFieldResult:
                 "this field. Continue with the remaining fields and submit."
             )
         lines = [f"FIELD_SET_FAILED: {self.note or 'could not set the field'}{moved}"]
+        if self.no_match and self.typeahead and self.searched:
+            # The whole honest chain was searched in the site's own catalogue.
+            # Whatever the search showed is a DIFFERENT entity (job1923 typed
+            # its way into another campus by hand after this point).
+            lines.append(
+                f"This field searches the site's own catalogue. It was searched for "
+                f"{self.value!r} and every other true name ("
+                + ", ".join(repr(s) for s in self.searched)
+                + ") including its 'not listed' / 'Other' escapes, and none of them "
+                "exists there. The results it shows instead are DIFFERENT entries "
+                "and must not be picked. Do NOT type more spellings by hand. If the "
+                "field is required, stop and report STATUS: stuck with DETAIL naming "
+                "this field and saying the site's catalogue has no true option; if "
+                "it is optional, leave it empty and continue."
+            )
+            return "\n".join(lines)
         if self.no_match:
             # The site's vocabulary genuinely lacks this value, and we already
             # tried every honest alternative we know. Guessing more phrasings is
@@ -1320,6 +1401,8 @@ class SetFieldResult:
             # give up.
             if self.available_options:
                 lines.append(
+                    f"Searching this field for {self.value!r} showed only:"
+                    if self.typeahead else
                     "These are the ONLY values this field accepts, in full:"
                 )
                 lines.extend(f"  - {o}" for o in self.available_options[:60])
@@ -1568,7 +1651,7 @@ def set_field(
             expect_sig = sigs[by_index]
 
     def attempt_value(
-        tab: dict, strict: bool, use_value: str
+        tab: dict, strict: bool, use_value: str, exact: bool = False
     ) -> Optional[SetFieldResult]:
         try:
             with _Cdp(tab["webSocketDebuggerUrl"]) as cdp:
@@ -1578,7 +1661,8 @@ def set_field(
                     {
                         "expression": f"({_SET_FIELD_JS})({json.dumps(field_hint)},"
                         f" {json.dumps(use_value)}, {json.dumps(bool(strict))},"
-                        f" {json.dumps(by_index)}, {json.dumps(expect_sig)})",
+                        f" {json.dumps(by_index)}, {json.dumps(expect_sig)},"
+                        f" {json.dumps(bool(exact))})",
                         "returnByValue": True,
                         # The setter is async now: it settles and re-reads to
                         # catch framework-reverted values, and drives
@@ -1609,6 +1693,7 @@ def set_field(
                     empty_remote=bool(data.get("emptyRemote")),
                     available_options=data.get("availableOptions") or [],
                     moved_to=int(data.get("movedTo") or 0),
+                    typeahead=bool(data.get("typeahead")),
                 )
         except Exception as e:
             logger.debug("set_field: target failed: %s", e)
@@ -1635,11 +1720,46 @@ def set_field(
     # cycled three spellings of the same college, job570 two of the same
     # degree), walk our own ranked list of phrasings that are still TRUE for
     # the candidate and try the first one this site actually offers.
-    if primary is not None and primary.no_match and primary.available_options:
-        try:
-            from module4 import answer_book
-        except Exception:  # pragma: no cover - import guard
-            answer_book = None  # type: ignore[assignment]
+    try:
+        from module4 import answer_book
+    except Exception:  # pragma: no cover - import guard
+        answer_book = None  # type: ignore[assignment]
+    # A search typeahead only ever shows the results for what was typed, so
+    # its "options" never contain an alias that was not searched for (Ashby's
+    # School catalogue, job1923). Search each honest alternative in turn and
+    # take only an exact hit; the escape terms come last in the chain.
+    if (primary is not None and primary.no_match and primary.typeahead
+            and answer_book is not None):
+        alts = [a for a in answer_book.fallbacks_for(value)
+                if _norm_py(a) != _norm_py(value)]
+        deadline = time.monotonic() + TYPEAHEAD_WALK_SEC
+        for alt in alts:
+            if time.monotonic() > deadline:
+                break
+            primary.searched.append(alt)
+            retry = attempt_value(targets[0], False, alt, exact=True)
+            if retry and retry.ok:
+                retry.value = value
+                retry.substituted = alt
+                logger.info(
+                    "set_field: %s = %r (searched; substituted %r) via %s",
+                    f"#{index}" if index else repr(field_hint),
+                    value,
+                    alt,
+                    retry.strategy,
+                )
+                return retry
+            if retry is None or not retry.no_match:
+                break  # the field moved or failed some other way; stop here
+        if primary.searched:
+            logger.info(
+                "set_field: %r not in this typeahead's catalogue; searched %d "
+                "alternative(s), none exact",
+                value,
+                len(primary.searched),
+            )
+    if (primary is not None and primary.no_match and primary.available_options
+            and not primary.searched):
         if answer_book is not None:
             alt = answer_book.pick_from_options(value, primary.available_options)
             if alt and _norm_py(alt) != _norm_py(value):

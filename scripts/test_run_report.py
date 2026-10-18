@@ -89,6 +89,16 @@ REAL_SHAPES = [
         ("stuck:Shine.com's \"Notice Period\" react-dropdown will not commit a choice (NEED_FIELD x2)",
          "Treyco"),
     ]),
+    # GHO-57: the reason also says the resume was uploaded, which used to
+    # land it in upload:failed.
+    ("field:no_true_option", "needs_g", [
+        ("stuck:Required \"School\" field on Northwind's Ashby application has no database entry for "
+         "LIIT Springfield (tried full name, abbreviations, and city-only queries); every other required "
+         "field was completed and resume/cover letter uploaded, but submission is blocked without a true "
+         "school match", "Northwind"),
+        ("stuck:Required School field: Treyco's site catalogue has no true option for LIIT Springfield "
+         "(searched every alias and the not-listed escapes); resume uploaded", "Treyco"),
+    ]),
     ("no_web_form", "fixable", [
         ("stuck:The posting has no web application form, just a mailto: address to email a CV to",
          "Northwind"),
