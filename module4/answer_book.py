@@ -50,6 +50,9 @@ _SCHOOL_ESCAPES = (
     "College not listed",
     "University not listed",
     "Institution not listed",
+    # Workday's School catalogue escape (J&J 1885, 2026-10-18); the form's
+    # help text says to pick it when the school is missing.
+    "Other - See Resume",
     "Other",
     "Other (not listed)",
     "Not listed",
@@ -138,6 +141,11 @@ def _personal_chains() -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
     chains: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for key, escapes in (("school", _SCHOOL_ESCAPES), ("city", ())):
         triggers, options = personal.answer_chain(key)
+        if key == "school":
+            # Every school spelling is the same school, so asking for any of
+            # them (on J&J 1885 the agent asked for the bare acronym) walks the
+            # chain. Not cities: a state name in that chain is not the city.
+            triggers = list(triggers) + list(options)
         if triggers and options:
             chains.append((tuple(triggers), tuple(options) + escapes))
     return chains
@@ -150,6 +158,47 @@ def _all_chains() -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
 def _norm(s: str) -> str:
     """Lowercase, strip punctuation, collapse whitespace."""
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+_INSTITUTION_WORDS = frozenset(
+    ("institute", "institution", "university", "college", "school", "academy", "polytechnic")
+)
+
+
+def _is_institution(value: str) -> bool:
+    """True for a school name: an institution word, or one of the candidate's
+    own school spellings (which include bare acronyms)."""
+    n = _norm(value)
+    if not n:
+        return False
+    if _INSTITUTION_WORDS & set(n.split()):
+        return True
+    triggers, options = personal.answer_chain("school")
+    return n in {_norm(s) for s in list(triggers) + list(options)}
+
+
+# Search-as-you-type widgets (Workday School) only show what the query
+# matches, so every escape phrasing would cost its own search. These two
+# queries surface all of _SCHOOL_ESCAPES ("Other - See Resume", "School not
+# listed", ...); pick_from_options then chooses among the results.
+_ESCAPE_QUERIES = ("Other", "not listed")
+
+
+def search_queries_for(value: str) -> list[str]:
+    """Queries worth typing into a search widget that found nothing for `value`.
+
+    The specific fallbacks in order, then one query per escape family when the
+    chain has escapes. Generic entries never come before specific ones.
+    """
+    specific: list[str] = []
+    has_escape = False
+    for alt in fallbacks_for(value):
+        n = _norm(alt)
+        if n.startswith("other") or "not listed" in n:
+            has_escape = True
+        elif n not in {_norm(s) for s in specific}:
+            specific.append(alt)
+    return specific + (list(_ESCAPE_QUERIES) if has_escape else [])
 
 
 def fallbacks_for(value: str) -> list[str]:
@@ -214,10 +263,14 @@ def pick_from_options(value: str, options: list[str]) -> Optional[str]:
     #    real application. Requiring whole tokens makes that impossible while
     #    still letting "Computer Science" match "Computer Science and
     #    Engineering".
+    #    Never for a school, though: whole tokens still let the candidate's
+    #    bare acronym match "<acronym> <other city>", a different institution
+    #    (J&J 1885, 2026-10-18). A school matches only through its own
+    #    spellings above or an escape below.
     want_toks = want.split()
-    if len(want) >= 4 and want_toks:
+    if len(want) >= 4 and want_toks and not _is_institution(value):
         for orig, n in sorted(norm_opts, key=lambda p: -len(p[1])):
-            if len(n) < 4:
+            if len(n) < 4 or _is_institution(orig):
                 continue
             opt_toks = n.split()
             if not opt_toks:

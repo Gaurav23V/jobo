@@ -18,6 +18,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 
+from module4 import browser_session
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -441,7 +443,9 @@ def _page_targets(cdp_url: str) -> list[dict]:
     except (urllib.error.URLError, OSError, ValueError) as e:
         logger.warning("click: could not list targets: %s", e)
         return []
-    return [t for t in tabs if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
+    pages = [t for t in tabs if isinstance(t, dict) and t.get("type") == "page"]
+    browser_session.note_tabs(cdp_url, pages)
+    return [t for t in pages if t.get("webSocketDebuggerUrl")]
 
 
 def _value(response: dict):

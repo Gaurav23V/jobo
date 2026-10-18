@@ -593,6 +593,18 @@ def _open_page_urls(cdp_url: str) -> tuple[str, ...]:
     )
 
 
+_WORKDAY_HOST = re.compile(r"(?:^|\.)myworkday(?:jobs|site)\.com$", re.I)
+
+
+def _seen_workday(cdp_url: str) -> bool:
+    """True once a handoff helper has seen this worker's browser on a Workday
+    tenant (browser_session.note_tabs; no browser request of its own)."""
+    from module4 import browser_session
+
+    return any(_WORKDAY_HOST.search(h) for h in browser_session.seen_hosts(cdp_url))
+
+
+
 # --- Attach canary (GHO-17) -------------------------------------------------
 # After the 15 Oct 2026 07:00 Hermes auto-update, every apply agent drove its
 # own scratch headless Chromium instead of the worker's CDP browser. The
@@ -1340,6 +1352,9 @@ def _run_apply_agent(
     # so a rejected code is never handed back again.
     otp_not_before = datetime.now(timezone.utc) - timedelta(seconds=OTP_CLOCK_SLACK_SEC)
     prompt = full
+    from module4 import browser_session
+
+    browser_session.forget_tabs(cdp_url)
 
     def account_setup_note() -> str:
         # The first account handoff grows the budget once and tells the agent.
@@ -1358,6 +1373,12 @@ def _run_apply_agent(
         )
 
     while True:
+        # A Workday apply always signs in or creates an account first, and
+        # the agent usually does it by typing, with no handoff to trigger the
+        # allowance: J&J 1885 (2026-10-18) spent ~12 steps creating one and
+        # ran out on Voluntary Disclosures, step 4 of 5.
+        if session_id and budget == base_budget and _seen_workday(cdp_url):
+            prompt += account_setup_note()
         steps_used = sum(calls_by_session.values())
         steps_left = budget - steps_used
         if session_id and steps_left <= 0:

@@ -69,6 +69,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 
+from module4 import browser_session
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -77,6 +79,9 @@ except ImportError:  # pragma: no cover
     websocket = None  # type: ignore[assignment]
 
 WS_TIMEOUT_SEC = 20
+# Extra searches a search box gets when the asked-for value finds nothing:
+# the candidate's other spellings plus the two escape queries (~5s each).
+MAX_SEARCH_FALLBACKS = 6
 
 
 def _norm_py(s: str) -> str:
@@ -1420,7 +1425,9 @@ def _page_targets(cdp_url: str) -> list[dict]:
     except (urllib.error.URLError, OSError, ValueError) as e:
         logger.warning("set_field: could not list targets: %s", e)
         return []
-    return [t for t in tabs if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
+    pages = [t for t in tabs if isinstance(t, dict) and t.get("type") == "page"]
+    browser_session.note_tabs(cdp_url, pages)
+    return [t for t in pages if t.get("webSocketDebuggerUrl")]
 
 
 def _ensure_browser(cdp_url: str) -> tuple[bool, str]:
@@ -1635,31 +1642,55 @@ def set_field(
     # cycled three spellings of the same college, job570 two of the same
     # degree), walk our own ranked list of phrasings that are still TRUE for
     # the candidate and try the first one this site actually offers.
-    if primary is not None and primary.no_match and primary.available_options:
+    if primary is not None and primary.no_match:
         try:
             from module4 import answer_book
         except Exception:  # pragma: no cover - import guard
             answer_book = None  # type: ignore[assignment]
-        if answer_book is not None:
-            alt = answer_book.pick_from_options(value, primary.available_options)
-            if alt and _norm_py(alt) != _norm_py(value):
+        tried = {_norm_py(value)}
+
+        def try_alt(alt: str) -> Optional[SetFieldResult]:
+            tried.add(_norm_py(alt))
+            logger.info("set_field: %r not offered; trying honest alternative %r", value, alt)
+            retry = attempt_value(targets[0], False, alt)
+            if retry and retry.ok:
+                retry.value = value
+                retry.substituted = alt
                 logger.info(
-                    "set_field: %r not offered; trying honest alternative %r",
+                    "set_field: %s = %r (substituted %r) via %s",
+                    f"#{index}" if index else repr(field_hint),
                     value,
                     alt,
+                    retry.strategy,
                 )
-                retry = attempt_value(targets[0], False, alt)
+            return retry
+
+        if answer_book is not None and primary.available_options:
+            alt = answer_book.pick_from_options(value, primary.available_options)
+            if alt and _norm_py(alt) not in tried:
+                retry = try_alt(alt)
                 if retry and retry.ok:
-                    retry.value = value
-                    retry.substituted = alt
-                    logger.info(
-                        "set_field: %s = %r (substituted %r) via %s",
-                        f"#{index}" if index else repr(field_hint),
-                        value,
-                        alt,
-                        retry.strategy,
-                    )
                     return retry
+
+        # 1c. A search box (Workday School) only shows what the query matched,
+        # so "not offered" means "not found by THIS search". Search our other
+        # true spellings and the escapes ("Other - See Resume") here, in code.
+        # J&J 1885 (2026-10-18) left this to the agent: ~25 model steps of
+        # typed spellings on one School box, then out of budget two pages on.
+        search_box = primary.empty_remote or primary.strategy.startswith("workday-prompt")
+        if answer_book is not None and search_box:
+            for query in answer_book.search_queries_for(value)[:MAX_SEARCH_FALLBACKS]:
+                if _norm_py(query) in tried:
+                    continue
+                res = try_alt(query)
+                if res and res.ok:
+                    return res
+                if res and res.no_match and res.available_options:
+                    pick = answer_book.pick_from_options(value, res.available_options)
+                    if pick and _norm_py(pick) not in tried:
+                        res = try_alt(pick)
+                        if res and res.ok:
+                            return res
 
     # An indexed request must never wander to another tab: the number refers to
     # the listing taken from the active page.

@@ -270,7 +270,13 @@ date components. Bare custom dropdowns are listed too: use their question's
 number rather than a nearby text field. The pipeline scrolls, selects a real
 option and verifies the result before replying `FIELD_SET: ...`. Then carry on.
 Workday search boxes (Skills, School, "How did you hear") work the same way:
-give the exact result text; each FIELD_SET adds one value.
+give the exact result text; each FIELD_SET adds one value. Never type into a
+Workday School box yourself: ask once by number with the school's name. If
+the school is not in Workday's list, the pipeline itself searches the other
+true spellings and the form's own escape ("Other - See Resume").
+A Workday page of dropdown questions (Application Questions, Voluntary
+Disclosures) costs two clicks per question by hand: print NEED_FIELDS once,
+then set every dropdown in ONE turn, one `NEED_FIELD:` line each.
 
 Rules: one field per directive line; put ALL the fields you can already set
 from one listing in the SAME turn, one `NEED_FIELD:` line each (they run in

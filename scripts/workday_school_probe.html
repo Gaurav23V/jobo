@@ -1,0 +1,84 @@
+<!doctype html>
+<!--
+Local copy of the Workday "School or University" search prompt that cost
+J&J 1885 (2026-10-18) its step budget: the catalogue searches by keyword,
+has no entry for the candidate's school, offers similarly named DIFFERENT
+schools for the bare acronym, and has its own escape "Other - See Resume".
+Type, Enter to search, click a result to add a pill; results always include
+an echo row (id "menuItem-" + typed text). Fictional names only.
+-->
+<html><head><meta charset="utf-8"><title>workday school</title>
+<style>
+  body{font:14px sans-serif;margin:20px;padding-bottom:120px}
+  .wd-field{margin:14px 0}
+  .prompt{position:relative;width:420px;border:1px solid #888;min-height:36px}
+  .prompt input{width:400px;height:30px;border:0}
+  .pills{position:absolute;left:0;top:0;margin:0;padding:0;list-style:none}
+  .pills [data-automation-id=selectedItem]{background:#cde;padding:4px 12px;display:inline-block;width:360px}
+  .results{position:absolute;background:#fff;border:1px solid #888;width:420px;z-index:20}
+  .results [role=option]{height:30px;line-height:30px;padding-left:6px;cursor:pointer}
+</style></head><body>
+<h3>My Experience</h3>
+<div data-automation-id="formField-school" class="wd-field">
+  <label for="school">School or University*</label>
+  <div class="prompt" data-automation-id="multiselectInputContainer" data-catalog="missing">
+    <ul class="pills" data-automation-id="selectedItemList"></ul>
+    <input id="school" placeholder="Search" data-uxi-widget-type="selectinput" autocomplete="off">
+  </div>
+</div>
+<div data-automation-id="formField-school2" class="wd-field">
+  <label for="school2">Previous School or University</label>
+  <div class="prompt" data-automation-id="multiselectInputContainer" data-catalog="listed">
+    <ul class="pills" data-automation-id="selectedItemList"></ul>
+    <input id="school2" placeholder="Search" data-uxi-widget-type="selectinput" autocomplete="off">
+  </div>
+</div>
+<script>
+const CATALOGS = {
+  // The candidate's school is missing; same-acronym schools are not it.
+  missing: ['LIIT Bombay', 'LIIT Delhi', 'Lakeside Institute of Information Technology Bombay',
+            'Harvard University', 'Other - See Resume'],
+  // The school is listed, but only under its comma spelling.
+  listed: ['LIIT Bombay', 'Lakeside Institute of Information Technology, Springfield',
+           'Other - See Resume'],
+};
+document.querySelectorAll('[data-automation-id=multiselectInputContainer]').forEach(box => {
+  const input = box.querySelector('input'), pills = box.querySelector('.pills');
+  const catalog = CATALOGS[box.dataset.catalog];
+  let results = null;
+  const addPill = t => {
+    if ([...pills.querySelectorAll('[data-automation-id=selectedItem]')].some(p => p.title === t)) return;
+    const li = document.createElement('li');
+    li.innerHTML = '<div role="option" data-automation-id="selectedItem"><p data-automation-id="promptOption"></p></div>';
+    li.firstChild.title = t; li.querySelector('p').textContent = t;
+    pills.appendChild(li);
+  };
+  const close = () => { if (results) { results.remove(); results = null; } };
+  const words = s => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Tab') { close(); return; }
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const q = input.value.trim();
+    close();
+    results = document.createElement('div');
+    results.className = 'results'; results.setAttribute('role', 'listbox');
+    results.setAttribute('data-automation-id', 'activeListContainer');
+    // Keyword search: every query word must appear in the entry.
+    const rows = catalog.filter(c => q && words(q).every(w => words(c).includes(w)));
+    const all = [...rows.map(t => ['menuItem-REMOTE-' + catalog.indexOf(t), t]), ['menuItem-' + q, q]];
+    all.forEach(([id, t]) => {
+      const row = document.createElement('div');
+      row.setAttribute('role', 'option'); row.id = id;
+      row.innerHTML = '<div data-automation-id="promptLeafNode"><p data-automation-id="promptOption"></p></div>';
+      row.querySelector('p').textContent = t;
+      row.addEventListener('click', () => addPill(t));
+      results.appendChild(row);
+    });
+    const r = box.getBoundingClientRect();
+    results.style.left = (r.left + scrollX) + 'px'; results.style.top = (r.bottom + scrollY) + 'px';
+    document.body.appendChild(results);
+  });
+});
+</script>
+</body></html>

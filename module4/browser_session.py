@@ -233,3 +233,30 @@ def ensure_healthy(profile_dir: Path) -> str | None:
     ensure_guard_tab()
     logger.info("Browser relaunched successfully.")
     return url
+
+
+# Hosts of the tabs the handoff helpers (clicker, form_filler, uploader) saw
+# when they listed this browser's pages. The apply driver reads them to learn
+# which ATS the agent is on without making a browser request of its own.
+_SEEN_HOSTS: dict[str, set[str]] = {}
+
+
+def note_tabs(cdp_url: str, tabs: list[dict]) -> None:
+    from urllib.parse import urlparse
+
+    hosts = _SEEN_HOSTS.setdefault(cdp_url, set())
+    for t in tabs:
+        try:
+            host = urlparse(str(t.get("url") or "")).hostname
+        except ValueError:
+            continue
+        if host:
+            hosts.add(host.lower())
+
+
+def seen_hosts(cdp_url: str) -> set[str]:
+    return set(_SEEN_HOSTS.get(cdp_url, ()))
+
+
+def forget_tabs(cdp_url: str) -> None:
+    _SEEN_HOSTS.pop(cdp_url, None)
