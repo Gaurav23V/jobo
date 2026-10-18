@@ -28,8 +28,8 @@ fi
 mkdir -p "${PROFILE_DIR}/plugins"
 ln -sfn "${HERMES_ROOT}/plugins/${PROVIDER_PLUGIN}" "${PROFILE_DIR}/plugins/${PROVIDER_PLUGIN}"
 ln -sfn "${ROOT}/hermes_plugin/jobo-browser" "${PROFILE_DIR}/plugins/jobo-browser"
-# Local relay fix the provider plugin needs until upstream has it (GHO-10).
-bash "${ROOT}/scripts/ensure_directsdk_patch.sh"
+# The provider plugin must keep Claude Code's session-title request off (GHO-10).
+python3 -I -B "${ROOT}/scripts/check_directsdk_title.py"
 
 set_cfg() { hermes -p "$PROFILE" config set "$1" "$2" >/dev/null; echo "  ${1} = ${2}"; }
 echo "Applying jobo profile settings:"

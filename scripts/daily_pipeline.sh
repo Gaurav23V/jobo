@@ -227,12 +227,14 @@ fi
 # Phase-1 skip rule makes this a no-op for already-scored jobs.
 if ! run_stage "triage" triage --quiet; then FAILED=1; fi
 
-# Hermes' Claude plugin needs a local fix or every apply agent answers with a
-# session-title JSON and no verdict (GHO-10); a plugin update drops the fix.
-if bash "$REPO/scripts/ensure_directsdk_patch.sh" >> "$LOG" 2>&1; then
+# Without Hermes' Claude plugin turning off Claude Code's session-title request,
+# every apply agent answers with a session-title JSON and no verdict (GHO-10).
+# Plugin 0.3.1 does it upstream; a plugin or Claude Code update could undo it.
+# (The stage keeps its old name: run-report and the failure ledger key on it.)
+if python3 -I -B "$REPO/scripts/check_directsdk_title.py" >> "$LOG" 2>&1; then
   STAGE_VERDICTS+=("directsdk_patch:OK")
 else
-  log "!!! directsdk patch missing - applies may all end verdict-less, see GHO-10 !!!"
+  log "!!! directsdk title fix missing - applies may all end verdict-less, see GHO-10 / GHO-53 !!!"
   STAGE_VERDICTS+=("directsdk_patch:FAILED")
   FAILED=1
 fi

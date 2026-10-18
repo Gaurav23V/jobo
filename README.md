@@ -83,9 +83,10 @@ already closed is marked closed and gets no materials.
   stops it at bot walls. The apply model must be a Claude Sonnet model
   (`module4/model_guard.py`).
 - The Hermes version is pinned (`scripts/pin_hermes.sh`, run through
-  `scripts/hermes_pinned.sh`) because Hermes updates itself. A local fix to
-  Hermes' Claude provider plugin lives in `hermes_plugin/patches/` and is
-  re-applied by `scripts/ensure_directsdk_patch.sh` before each apply stage;
+  `scripts/hermes_pinned.sh`) because Hermes updates itself. Before each apply
+  stage `scripts/check_directsdk_title.py` checks that Hermes' Claude provider
+  plugin still keeps Claude Code's session-title request from replacing the
+  agent's reply (GHO-10; fixed upstream in plugin 0.3.1);
   a browser fix to Hermes itself is carried in `patches/` (see
   [patches/README.md](patches/README.md)).
 - The browser is jobo's own Chromium profile (default `$HOME/jobo-linkedin-profile`,

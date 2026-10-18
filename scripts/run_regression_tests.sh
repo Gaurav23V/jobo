@@ -14,6 +14,8 @@ if [[ $# -eq 0 ]]; then
   # The post-run review webhook (GHO-44) against a 127.0.0.1 HTTP stub.
   bash "$ROOT/scripts/test_review_webhook.sh"
   bash "$ROOT/scripts/test_premerge_check.sh"
+  # The directsdk session-title preflight (GHO-53) on stub plugins and CLIs.
+  python3 -B "$ROOT/scripts/test_directsdk_title_check.py"
 fi
 if [[ -x "$ROOT/.venv/bin/python" ]]; then
   exec "$ROOT/.venv/bin/python" -B "$ROOT/scripts/run_isolated_regressions.py" "$@"

@@ -19,8 +19,8 @@ cp "$REAL_REPO/scripts/daily_pipeline.sh" "$REAL_REPO/scripts/lib_review_webhook
 # The temp repo has no .env, so the post-run review webhook (GHO-44) can never
 # reach the real routine from here; case 11 points it at a dead local port.
 rm -f "$TMP/repo/.env"
-# The directsdk plugin-patch preflight (GHO-10) is not under test here.
-printf '#!/bin/bash\necho "directsdk patch: present"\n' > "$TMP/repo/scripts/ensure_directsdk_patch.sh"
+# The directsdk session-title preflight (GHO-10, GHO-53) is not under test here.
+printf 'print("directsdk title fix: present")\n' > "$TMP/repo/scripts/check_directsdk_title.py"
 
 cat > "$TMP/gate_stub.py" <<'EOF'
 import os, sys
