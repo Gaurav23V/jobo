@@ -335,6 +335,8 @@ def section_clustering(tmp: Path) -> None:
     check("list --status filters", [e.signature for e in rr.ledger_list(session, "wont_fix")] == ["no:such"])
     check("list renders", "account:create_noop" in rr.render_ledger(rr.ledger_list(session)))
 
+    section_ledger_cli(tmp)
+
     print("\n5. text output caps at 15 clusters")
     many = rr.RunReport(
         run_log="x.log", run_ts="t", overall="OK", stages=[], budget=None,
@@ -348,6 +350,52 @@ def section_clustering(tmp: Path) -> None:
     text = rr.render_text(many)
     check("15 shown, 3 more counted", "15. sig14" in text and "16. " not in text
           and "3 more clusters" in text)
+
+
+def section_ledger_cli(tmp: Path) -> None:
+    """`jobo ledger set` through click, against a temp DB (GHO-59).
+
+    The command handed rr.ledger_set a throwaway get_session(); the session was
+    collected on return, so rendering the committed (expired) rows raised
+    DetachedInstanceError after the write had gone through.
+    """
+    print("\n4b. ledger CLI end to end (GHO-59)")
+    from click.testing import CliRunner
+
+    import main as jobo_main
+
+    engine = create_engine(f"sqlite:///{tmp / 'ledger_cli.db'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    orig = jobo_main.get_session, jobo_main.init_db
+    jobo_main.get_session, jobo_main.init_db = factory, lambda: None
+    try:
+        runner = CliRunner()
+        out = runner.invoke(jobo_main.cli, ["ledger", "set", "other:stuck", "--host", "ziprecruiter.com",
+                                            "--bucket", "temporary"])
+        check("ledger set (new row) exits 0", out.exit_code == 0, repr(out.exception))
+        check("ledger set prints the row", "other:stuck" in out.output and "temporary" in out.output,
+              out.output.splitlines()[-1] if out.output else "")
+        out = runner.invoke(jobo_main.cli, ["ledger", "set", "other:stuck", "--status", "fixing",
+                                            "--issue", "GHO-999"])
+        check("ledger set (every host, existing row) exits 0", out.exit_code == 0, repr(out.exception))
+        check("ledger set shows the update", "fixing" in out.output and "GHO-999" in out.output)
+        with factory() as s:
+            row = s.get(FailureLedgerModel, ("other:stuck", "ziprecruiter.com"))
+            check("ledger set wrote the row",
+                  row is not None and (row.bucket, row.status, row.issue) == ("temporary", "fixing", "GHO-999"))
+        out = runner.invoke(jobo_main.cli, ["ledger", "set", "no:such", "--status", "open"])
+        check("ledger set on unknown signature is a usage error", out.exit_code == 2, out.output)
+        out = runner.invoke(jobo_main.cli, ["ledger", "list"])
+        check("ledger list exits 0 and shows the row", out.exit_code == 0 and "ziprecruiter.com" in out.output,
+              repr(out.exception))
+        out = runner.invoke(jobo_main.cli, ["ledger", "list", "--json"])
+        check("ledger list --json parses",
+              out.exit_code == 0 and json.loads(out.output)[0]["signature"] == "other:stuck",
+              repr(out.exception))
+    finally:
+        jobo_main.get_session, jobo_main.init_db = orig
+        engine.dispose()
 
 
 def main() -> int:

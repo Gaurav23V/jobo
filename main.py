@@ -580,14 +580,17 @@ def ledger_set(signature, host, bucket, issue, fix_commit, status):
     from module4 import run_report as rr
 
     init_db()
-    try:
-        entries = rr.ledger_set(
-            get_session(), signature, host=host, bucket=bucket, issue=issue,
-            fix_commit=fix_commit, status=status,
-        )
-    except LookupError as exc:
-        raise click.UsageError(str(exc))
-    click.echo(rr.render_ledger(entries))
+    # Render inside the session: the commit expires the rows, and a session
+    # dropped on return leaves them detached and unreadable (GHO-59).
+    with get_session() as session:
+        try:
+            entries = rr.ledger_set(
+                session, signature, host=host, bucket=bucket, issue=issue,
+                fix_commit=fix_commit, status=status,
+            )
+        except LookupError as exc:
+            raise click.UsageError(str(exc))
+        click.echo(rr.render_ledger(entries))
 
 
 @ledger.command("list")
@@ -602,11 +605,12 @@ def ledger_list(status, as_json):
     from module4 import run_report as rr
 
     init_db()
-    entries = rr.ledger_list(get_session(), status)
-    if as_json:
-        click.echo(json.dumps([rr.ledger_dict(e) for e in entries], indent=2))
-    else:
-        click.echo(rr.render_ledger(entries))
+    with get_session() as session:
+        entries = rr.ledger_list(session, status)
+        if as_json:
+            click.echo(json.dumps([rr.ledger_dict(e) for e in entries], indent=2))
+        else:
+            click.echo(rr.render_ledger(entries))
 
 
 @cli.command("budget-gate")
