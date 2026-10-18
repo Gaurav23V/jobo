@@ -35,6 +35,7 @@ Design notes
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from dataclasses import dataclass, field
@@ -110,6 +111,28 @@ _RESET_SUBJECT_HINTS = (
 )
 
 _URL_RE = re.compile(r"https?://[^\s\"'<>\)\]]+", re.I)
+
+# <a href="URL">label</a>, with the href quoted either way.
+_ANCHOR_RE = re.compile(
+    r"<a\b[^>]*?\bhref\s*=\s*(?:\"([^\"]*)\"|'([^']*)')[^>]*>", re.I
+)
+
+
+def mail_text(raw: str) -> str:
+    """Mail body as text, with every link target kept next to its label.
+
+    Job 1887, 2026-10-18: SuccessFactors mailed "Please click on the URL below
+    to change your password. Click Here", the reset URL only in the
+    <a href='...'> of "Click Here", and as HTML inside the text/plain part.
+    Stripping tags dropped the URL, so all three reset mails read as having no
+    link at all and the job was dropped as an unrecoverable account.
+    """
+    if "<" not in (raw or ""):
+        return raw or ""
+    raw = _ANCHOR_RE.sub(
+        lambda m: f" {html.unescape(m.group(1) or m.group(2) or '')} ", raw
+    )
+    return otp_lookup._strip_html(raw)
 
 
 @dataclass
@@ -298,8 +321,7 @@ def find_reset_link(
         if not any(h in subject.lower() for h in _RESET_SUBJECT_HINTS):
             continue
 
-        body = otp_lookup._walk_body(msg.get("payload", {}))
-        body = otp_lookup._strip_html(body)
+        body = mail_text(otp_lookup._walk_body(msg.get("payload", {}), keep_html=True))
         url, n = extract_reset_url(body, expect_domain=domain)
         if url:
             logger.info(

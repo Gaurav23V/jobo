@@ -76,6 +76,7 @@ SUITES = (
     'test_apply_speed', 'test_avature_stale_numbers',
     'test_setup_wizard', 'test_source_dedup', 'test_jobfound_source',
     'test_jobfound_stages', 'test_run_report', 'test_hcaptcha_walls',
+    'test_emailed_mail_lookup',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',

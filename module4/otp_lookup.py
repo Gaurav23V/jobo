@@ -304,8 +304,12 @@ def _decode_b64url(data: str) -> str:
     return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
 
 
-def _walk_body(payload: dict) -> str:
-    """Flatten a Gmail payload into searchable text (plain preferred)."""
+def _walk_body(payload: dict, keep_html: bool = False) -> str:
+    """Flatten a Gmail payload into searchable text (plain preferred).
+
+    keep_html: return an HTML-only body untouched, so a caller that needs
+    link targets (password_reset) can read the hrefs before stripping tags.
+    """
     plain, html = [], []
 
     def visit(part: dict) -> None:
@@ -326,6 +330,8 @@ def _walk_body(payload: dict) -> str:
     visit(payload)
     if plain:
         return "\n".join(plain)
+    if html and keep_html:
+        return "\n".join(html)
     if html:
         # Strip tags cheaply; we only need numbers and nearby words. Insert
         # spaces so `<td>1</td><td>2</td>` doesn't fuse into "12".
@@ -630,7 +636,7 @@ _WHITE_LABEL_ATS: tuple[str, ...] = (
     "jobvite", "csod", "cornerstoneondemand", "ultipro", "ukg", "darwinbox",
     "peoplestrong", "zohorecruit", "turbohire", "lever", "greenhouse", "ashbyhq",
     "workable", "recruitee", "teamtailor", "bamboohr", "freshteam", "keka",
-    "ceipal", "jazzhr", "pinpointhq", "personio", "adp",
+    "ceipal", "jazzhr", "pinpointhq", "personio", "adp", "talentrecruit",
 )
 
 # Words that say nothing about WHICH company a name is. Dropped from the
@@ -655,12 +661,13 @@ _DOMAIN_SUFFIX_WORDS = (
 )
 # Hosts that belong to the requesting ATS and whose first label is the
 # employer's tenant: treyco.wd1.myworkdayjobs.com, careers-treyco.icims.com,
-# treyco.taleo.net, treyco.avature.net.
+# treyco.taleo.net, treyco.avature.net, treyco.talentrecruit.com.
 _TENANT_HOST_RES: tuple[tuple[str, re.Pattern], ...] = (
     ("workday", re.compile(r"^([a-z0-9-]+)\.wd\d+\.myworkday(?:jobs|site)\.com$")),
     ("icims", re.compile(r"^(?:careers-|jobs-)?([a-z0-9-]+)\.icims\.com$")),
     ("oracle", re.compile(r"^([a-z0-9-]+)\.taleo\.net$")),
     ("avature", re.compile(r"^([a-z0-9-]+)\.avature\.net$")),
+    ("talentrecruit", re.compile(r"^([a-z0-9-]+)\.talentrecruit\.com$")),
 )
 # Vendor label -> family, so a tenant is only read from a page of the SAME
 # platform the agent asked about (a leftover tab of another employer's
@@ -668,7 +675,7 @@ _TENANT_HOST_RES: tuple[tuple[str, re.Pattern], ...] = (
 _VENDOR_FAMILY = {
     "myworkday": "workday", "myworkdayjobs": "workday", "myworkdaysite": "workday",
     "workday": "workday", "icims": "icims", "taleo": "oracle", "oracle": "oracle",
-    "oraclecloud": "oracle", "avature": "avature",
+    "oraclecloud": "oracle", "avature": "avature", "talentrecruit": "talentrecruit",
 }
 _TENANT_STOP = {"www", "careers", "career", "jobs", "job", "apply", "login", "secure", "global"}
 # Never an employer identity: words every vendor notification carries
@@ -739,6 +746,32 @@ def employer_tenants(urls, families=None) -> tuple[str, ...]:
             ):
                 out.append(tenant)
     return tuple(dict.fromkeys(out))
+
+
+# Job 1899, 2026-10-18: a TalentRecruit form at <tenant>.talentrecruit.com,
+# tenant "qxrinnovation", employer "QXR Innovation Centre India". The code came
+#     From: QXR India Recruiting <recruiting@qxr.com>
+#     Subject: Candidate Verification Email
+# five times, and every poll skipped it: the brand phrase is "qxr innovation
+# centre", and neither "qxr.com" nor "QXR India Recruiting" carries it whole.
+# The leading word alone ("qxr") is too weak on its own ("Harbor Point" must
+# not vouch for harbor.com), but here a second, independent source spells the
+# same start: the ATS tenant equals the name's first words run together. Only
+# then does the leading word count as the employer.
+def tenant_confirmed_lead(company: str, tenants) -> tuple[str, ...]:
+    """The company's leading word, when an ATS tenant spells the name's start.
+
+    "QXR Innovation Centre" + tenant "qxrinnovation" -> ("qxr",). A tenant that
+    is only the first word adds nothing (it is already an employer identity),
+    and a lead shorter than 3 letters or a generic word never counts.
+    """
+    words = [w for w in _words(company) if w not in _COMPANY_STOPWORDS]
+    if len(words) < 2 or len(words[0]) < 3 or not employer_brands(words[0]):
+        return ()
+    starts = {"".join(words[:k]) for k in range(2, len(words) + 1)}
+    if any(t in starts for t in tenants or ()):
+        return (words[0],)
+    return ()
 
 
 def _label_is_brand(label: str, compact: str) -> bool:
@@ -844,9 +877,11 @@ class SiteHint:
         """This hint plus the job's employer identity (company name, tenants)."""
         found = list(employer_brands(company))
         families = {_VENDOR_FAMILY[n] for n in self._vendor_names() if n in _VENDOR_FAMILY}
-        found.extend(employer_tenants(urls, families))
+        tenants = list(employer_tenants(urls, families))
         if self.sender:
-            found.extend(employer_tenants([f"https://{self.sender}/"], families))
+            tenants.extend(employer_tenants([f"https://{self.sender}/"], families))
+        found.extend(tenants)
+        found.extend(tenant_confirmed_lead(company, tenants))
         self.employer = tuple(dict.fromkeys(f for f in found if f))
         return self
 
