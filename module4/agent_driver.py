@@ -25,6 +25,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from module4 import captcha_walls
 from policy import personal
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ VALID_STATUSES = {
     # Not a failure either: no attempt is charged and the job comes back once
     # the site is un-paused.
     "paused_site",
+    # An hCaptcha challenge gates the email/sign-in step of an Oracle Cloud or
+    # iCIMS site for every visitor (module4/captcha_walls.py). Only the
+    # plugin's notice asks for it; the job is parked, no attempt charged.
+    "captcha_wall",
     # LinkedIn shows the shared apply browser as signed out. A PIPELINE
     # problem: the runner stops the stage and charges no attempt
     # (module4/linkedin_session.py). The agent never signs in itself.
@@ -456,6 +461,10 @@ def parse_verdict(text: str) -> ApplyOutcome:
         # displayed and READ BY A DECISION FUNCTION, never truncate it on the
         # way in. Truncate at the point of display only.
         detail = matches[-1].group(1).strip()
+    if status == "captcha_wall" and not captcha_walls.gate_host_in_text(detail):
+        # Parking is only for the Oracle Cloud / iCIMS gates; anywhere else it
+        # is the captcha_failed it always was (and must not wall that host).
+        status = "captcha_failed"
     if status not in VALID_STATUSES:
         status = "stuck"
         detail = detail or f"unparseable agent verdict: {text[-200:]}"

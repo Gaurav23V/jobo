@@ -27,6 +27,13 @@ On-page jigsaw sliders (Redpine's canvas "Slide to verify") are different: the
 page itself checks the drag. Those go to the NEED_SLIDER handoff
 (module4/slider_captcha.py), and the notice here says so.
 
+A VISIBLE hCaptcha challenge (an 'Iframe "hCaptcha challenge"' with its Skip /
+Refresh buttons; the invisible widget alone shows neither) has never been
+solved by the agent: 1878 and 1934 (2026-10-18) spent 15 and 17 model steps on
+tiles and drags first. It ends the run at once. On Oracle Cloud and iCIMS the
+challenge gates the email step for every visitor (module4/captcha_walls.py),
+so there it ends as STATUS: captcha_wall and the job is parked, not charged.
+
 State is per Hermes process (one agent run; a NEED_* handoff starts a new
 process, which is fine: the counters only need to stop loops inside a run).
 """
@@ -54,14 +61,22 @@ _DATADOME_TEXT = re.compile(
     re.I,
 )
 _JIGSAW_TEXT = re.compile(r"\bslide to verify\b", re.I)
+_HCAPTCHA_FRAME = re.compile(r'^\s*- Iframe "hCaptcha challenge"', re.I | re.M)
+_HCAPTCHA_CONTROLS = re.compile(
+    r'^\s*- button "(?:Skip Challenge|Refresh Challenge|Challenge refreshed)', re.I | re.M
+)
+
+# Same list as module4/captcha_walls.GATE_HOST_SUFFIXES (this plugin cannot
+# import module4); scripts/test_hcaptcha_walls.py keeps the two equal.
+GATE_HOST_SUFFIXES = ("oraclecloud.com", "icims.com")
 
 CAPTCHA_FAILED_DETAIL = "DataDome bot wall (geo.captcha-delivery.com); cannot be passed by an agent"
 
-_state: dict = {"datadome": False, "tracker_visits": 0, "walls": 0}
+_state: dict = {"datadome": False, "hcaptcha": False, "tracker_visits": 0, "walls": 0, "url": ""}
 
 
 def reset_state() -> None:
-    _state.update(datadome=False, tracker_visits=0, walls=0)
+    _state.update(datadome=False, hcaptcha=False, tracker_visits=0, walls=0, url="")
 
 
 def _host(url: str) -> str:
@@ -74,6 +89,21 @@ def _host(url: str) -> str:
 def is_tracker_url(url: str) -> bool:
     h = _host(url)
     return any(h == t or h.endswith("." + t) for t in TRACKER_HOSTS)
+
+
+def is_gate_host(host: str) -> bool:
+    h = (host or "").lower().rstrip(".")
+    return any(h == s or h.endswith("." + s) for s in GATE_HOST_SUFFIXES)
+
+
+def _page_url(data: dict) -> str:
+    """The page a result shows: its url, else the frame tree's top frame."""
+    url = data.get("url")
+    if isinstance(url, str) and url:
+        return url
+    tree = data.get("frame_tree")
+    top = tree.get("top") if isinstance(tree, dict) else None
+    return str(top.get("url") or "") if isinstance(top, dict) else ""
 
 
 def _nav_url(tool_name: str, a: dict) -> tuple[str, str]:
@@ -93,6 +123,12 @@ def _nav_url(tool_name: str, a: dict) -> tuple[str, str]:
 def check_tool_call(tool_name: str, args: dict | None) -> str | None:
     a = args if isinstance(args, dict) else {}
     url, method = _nav_url(tool_name, a)
+    if _state["hcaptcha"] and (tool_name == "browser_vision" or method.startswith("input.dispatch")):
+        return (
+            "BLOCKED by jobo: an hCaptcha image challenge is on screen. The agent has never "
+            "solved one, and every attempt spent 10+ model steps on it. Do not study, click "
+            "or drag it. End now as the page notice says."
+        )
     if _state["datadome"] and (tool_name == "browser_vision" or method.startswith("input.dispatch")):
         return (
             "BLOCKED by jobo: the current page is a DataDome bot wall. Screenshots, drags "
@@ -146,7 +182,7 @@ def wall_tracker(data: dict) -> str:
 
 
 def classify(data: dict) -> str | None:
-    """'datadome', 'jigsaw' or None for a navigate/snapshot result dict."""
+    """'datadome', 'jigsaw', 'hcaptcha' or None for a navigate/snapshot result dict."""
     snap = str(data.get("snapshot") or "")
     url = str(data.get("url") or "")
     title = str(data.get("title") or "")
@@ -155,6 +191,8 @@ def classify(data: dict) -> str | None:
         return "datadome"
     if _JIGSAW_TEXT.search(snap) and re.search(r"\bCanvas\b", snap):
         return "jigsaw"
+    if _HCAPTCHA_FRAME.search(snap) and _HCAPTCHA_CONTROLS.search(snap):
+        return "hcaptcha"
     return None
 
 
@@ -189,6 +227,28 @@ def datadome_notice(tracker: str) -> str:
     )
 
 
+def hcaptcha_notice(host: str) -> str:
+    head = (
+        "[jobo: an hCaptcha image challenge is on screen. The agent cannot solve these "
+        "(never once, across Oracle, iCIMS and Lever), so do not look at it, click tiles, "
+        "drag, skip or refresh. "
+    )
+    if is_gate_host(host):
+        return head + (
+            f"{host} puts it in front of the whole application for every visitor (tested "
+            "in a fresh browser), so this job is parked and costs no attempt. End NOW with:\n"
+            "STATUS: captcha_wall\n"
+            f"DETAIL: hCaptcha challenge on the email/sign-in step at {host}\n"
+            "FIELDS_FILLED_JSON: {}]"
+        )
+    return head + (
+        "End NOW with:\n"
+        "STATUS: captcha_failed\n"
+        f"DETAIL: hCaptcha image challenge at {host or 'this form'}; cannot be solved by the agent\n"
+        "FIELDS_FILLED_JSON: {}]"
+    )
+
+
 JIGSAW_NOTICE = (
     "[jobo: this form has a jigsaw 'Slide to verify' captcha. Do not drag it yourself "
     "and do not study it with browser_vision. Fill every other field first, then print "
@@ -211,11 +271,15 @@ def observe(tool_name: str, result) -> tuple[str, str] | None:
         return None
     if not isinstance(data, dict):
         return None
+    _state["url"] = _page_url(data) or _state["url"]
     kind = classify(data)
     was_wall = _state["datadome"]
     _state["datadome"] = kind == "datadome"
+    _state["hcaptcha"] = kind == "hcaptcha"
     if not kind:
         return None
+    if kind == "hcaptcha":
+        return kind, hcaptcha_notice(_host(_state["url"]))
     if kind == "datadome":
         if not was_wall:
             _state["walls"] += 1

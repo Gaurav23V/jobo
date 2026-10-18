@@ -1,0 +1,29 @@
+{
+ "success": true,
+ "snapshot": "[jobo: form view - interactive elements, headings and status text only. Call browser_snapshot with full=true to read the page's full text.]\n- link \"Skip to Main Content\" [ref=e1]\n- link \"Fabrikam\" [ref=e4]\n- heading \"Fabrikam\" [level=1, ref=e6]\n- link \"Job Listings\" [ref=e7]\n- heading \"Enter Your Information\" [level=1, ref=e10]\n- textbox \"Email\" [ref=e11]: candidate@example.com\n- link \"Privacy Notice\" [ref=e14]\n- combobox [expanded=false, ref=e15]: — Make a Selection —\n- option \"— Make a Selection —\" [selected, ref=e17]\n- option \"Please consider my information for any opportunities at the Fabrikam Center of Excellence\" [ref=e18]\n- option \"I just want to be considered for this job\" [ref=e19]\n- LabelText [ref=e13] clickable [cursor:pointer]\n- checkbox \"I've read and understood\" [checked=false, ref=e16]\n- button \"Next\" [disabled, ref=e12]\n- link \"Application FAQs\" [ref=e2]\n- link \"www.icims.com\" [ref=e3]\n- button \"Close hCaptcha attribution notice\" [ref=e5]\n- link \"Privacy\" [ref=e8]\n- link \"Terms\" [ref=e9]",
+ "frame_tree": {
+  "top": {
+   "url": "https://careers-fabrikam.icims.com/jobs/30504/login?_sp=x&_jsqid=undefined",
+   "origin": "https://careers-fabrikam.icims.com",
+   "is_oopif": false
+  },
+  "children": [
+   {
+    "url": "https://careers-fabrikam.icims.com/jobs/30504/login?_sp=x&_jsqid=undefined&in_iframe=1&mobile=true&width=300&height=500&bga=true&needsRedirect=false&jan1offset=330&jun1offset=330",
+    "origin": "https://careers-fabrikam.icims.com",
+    "is_oopif": false
+   },
+   {
+    "url": "",
+    "origin": "",
+    "is_oopif": true
+   },
+   {
+    "url": "",
+    "origin": "",
+    "is_oopif": true
+   }
+  ],
+  "truncated": false
+ }
+}

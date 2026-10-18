@@ -30,6 +30,7 @@ from module4 import (
     blockers,
     browser_session,
     budget_guard,
+    captcha_walls,
     circuit_breaker,
     constants,
     google_forms,
@@ -288,6 +289,9 @@ class Module4Result:
     # Google Form behind Google sign-in: kept in the queue, no attempt
     # charged, skipped without an agent until the browser is signed in.
     google_signin_parked: int = 0
+    # hCaptcha on an Oracle Cloud / iCIMS sign-in gate (module4/captcha_walls.py):
+    # kept in the queue, no attempt charged, skipped by later runs.
+    captcha_parked: int = 0
     # The apply browser lost its LinkedIn session; the stage stopped so the
     # rest of the queue keeps its attempts (module4/linkedin_session.py).
     linkedin_signed_out: bool = False
@@ -669,6 +673,9 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
     deadline_hit = False
     consecutive_infra = 0
     consecutive_misreads = 0
+    walled = captcha_walls.walled_job_hosts(
+        session.query(JobModel).filter(JobModel.module4_last_status.like(f"{captcha_walls.STATUS_PREFIX}%"))
+    )
 
     for job in jobs:
         if unsettled is not None:
@@ -821,6 +828,20 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             )
             result.paused += 1
             result.details.append(f"job_id={jid}: PAUSED SITE ({paused_site})")
+            continue
+
+        # Same for a job_url on a host where another job is parked behind an
+        # hCaptcha sign-in wall (GHO-54: it meets the same wall).
+        wall_host = captcha_walls.walled_host_for_url(job.job_url, walled)
+        if wall_host and not force:
+            persist.mark_status(
+                session, job,
+                captcha_walls.status_for(wall_host, "another job on this host is parked behind its hCaptcha sign-in wall"),
+                dry_run=dry_run,
+            )
+            result.captcha_parked += 1
+            result.details.append(f"job_id={jid}: PARKED, hCaptcha sign-in wall on {wall_host}")
+            logger.info("[%s] Parked without an agent: hCaptcha sign-in wall on %s.", jid, wall_host)
             continue
 
         counts_before_job = _counters(result)
@@ -1249,6 +1270,16 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             result.paused += 1
             result.details.append(f"job_id={jid}: PAUSED SITE ({site})")
             logger.info("[%s] Paused site %s; job kept for later, no attempt charged.", jid, site)
+        elif outcome.status == "captcha_wall" and captcha_walls.gate_host_in_text(outcome.detail):
+            wall = captcha_walls.gate_host_in_text(outcome.detail)
+            persist.mark_status(
+                session, job, captcha_walls.status_for(wall, outcome.detail), dry_run=dry_run
+            )
+            if captcha_walls.own_host(job.job_url):
+                walled.add(captcha_walls.own_host(job.job_url))
+            result.captcha_parked += 1
+            result.details.append(f"job_id={jid}: PARKED, hCaptcha sign-in wall on {wall}")
+            logger.info("[%s] Parked (no attempt charged): hCaptcha sign-in wall on %s.", jid, wall)
         elif _google_form_wall(outcome, cdp):
             # Not the job's fault and not hopeless: park it, charge nothing.
             form_url = google_forms.find_form_url(outcome.detail) or next(
@@ -1307,7 +1338,7 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
     logger.info(
         "Apply stage totals: attempted=%d SUBMITTED=%d closed=%d already_applied=%d "
         "failed=%d dropped=%d (not retryable=%d) paused=%d google_signin_parked=%d "
-        "circuit_broken=%d preflight_closed=%d",
+        "captcha_parked=%d circuit_broken=%d preflight_closed=%d",
         result.attempted,
         result.submitted,
         result.closed,
@@ -1317,6 +1348,7 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
         result.permanent_blocked,
         result.paused,
         result.google_signin_parked,
+        result.captcha_parked,
         result.circuit_broken,
         result.preflight_closed,
     )

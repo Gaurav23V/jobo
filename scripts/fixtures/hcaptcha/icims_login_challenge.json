@@ -1,0 +1,29 @@
+{
+ "success": true,
+ "snapshot": "[jobo: form view - interactive elements, headings and status text only. Call browser_snapshot with full=true to read the page's full text.]\n- link \"Skip to Main Content\" [ref=e1]\n- link \"Fabrikam\" [ref=e4]\n- heading \"Fabrikam\" [level=1, ref=e7]\n- link \"Job Listings\" [ref=e8]\n- heading \"Enter Your Information\" [level=1, ref=e12]\n- textbox \"Email\" [ref=e13]: candidate@example.com\n- link \"Privacy Notice\" [ref=e16]\n- combobox [expanded=false, ref=e17]: I just want to be considered for this job\n- option \"— Make a Selection —\" [ref=e19]\n- option \"Please consider my information for any opportunities at the Fabrikam Center of Excellence\" [ref=e20]\n- option \"I just want to be considered for this job\" [selected, ref=e21]\n- LabelText [ref=e15] clickable [cursor:pointer]\n- checkbox \"I've read and understood\" [checked=true, ref=e18]\n- button \"Next\" [disabled, ref=e14]\n- link \"Application FAQs\" [ref=e2]\n- link \"www.icims.com\" [ref=e3]\n- button \"Close hCaptcha attribution notice\" [ref=e5]\n- StaticText \"Protected by hCaptcha \"\n- link \"Privacy\" [ref=e9]\n- link \"Terms\" [ref=e10]\n- Iframe \"hCaptcha challenge\" [ref=e11]\n- heading \"Drag the correct animal into its matching outline\" [level=2, ref=e27]\n- button \"Skip Challenge\" [ref=e22]\n- button \"EN - English, Select a language\" [ref=e26]\n- button \"About hCaptcha & Accessibility Options\" [expanded=false, ref=e23]\n- button \"Refresh Challenge.\" [ref=e24]\n- button \"hCaptcha logo, opens new window with more information\" [ref=e25]\n- generic [ref=e6] clickable [cursor:pointer]",
+ "frame_tree": {
+  "top": {
+   "url": "https://careers-fabrikam.icims.com/jobs/30504/login?_sp=x&_jsqid=undefined",
+   "origin": "https://careers-fabrikam.icims.com",
+   "is_oopif": false
+  },
+  "children": [
+   {
+    "url": "https://careers-fabrikam.icims.com/jobs/30504/login?_sp=x&_jsqid=undefined&in_iframe=1&mobile=true&width=300&height=500&bga=true&needsRedirect=false&jan1offset=330&jun1offset=330",
+    "origin": "https://careers-fabrikam.icims.com",
+    "is_oopif": false
+   },
+   {
+    "url": "",
+    "origin": "",
+    "is_oopif": true
+   },
+   {
+    "url": "",
+    "origin": "",
+    "is_oopif": true
+   }
+  ],
+  "truncated": false
+ }
+}

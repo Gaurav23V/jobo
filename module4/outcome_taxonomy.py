@@ -26,7 +26,9 @@ data/jobs.db (2026-10-14), not guessed:
     chose or a standing policy chose, not failures - `skipped_by_policy`.
   - Everything else with a non-null status (`stuck:...`, `captcha_failed:...`,
     `failed:...`, and any future prefix not listed above) is a genuine
-    attempt that did not reach a terminal success - `stuck`.
+    attempt that did not reach a terminal success - `stuck`. That includes
+    `captcha_wall:...` (module4/captcha_walls.py): parked, but a wall the site
+    put up, not a choice.
   - A null status (and `applied=False`) means the job was never attempted:
     `not_attempted`.
 """

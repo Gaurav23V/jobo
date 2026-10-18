@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from db.models import JobModel
+from module4 import captcha_walls
 from policy import employer_blocklist, paused_sites
 
 
@@ -49,8 +50,14 @@ def list_jobs_to_apply(
     # Jobs parked on a paused ATS wait until that site leaves
     # policy/paused_sites.PAUSED_SITES; an explicit --job-id or --force still
     # reaches them, for testing a fix.
+    # Jobs parked behind an hCaptcha sign-in gate (module4/captcha_walls.py)
+    # wait the same way.
     if job_id is None and not force:
-        rows = [r for r in rows if not paused_sites.still_paused(r.module4_last_status)]
+        rows = [
+            r for r in rows
+            if not paused_sites.still_paused(r.module4_last_status)
+            and not captcha_walls.is_parked(r.module4_last_status)
+        ]
     allowed, blocked = employer_blocklist.partition(rows)
     if blocked:
         employer_blocklist.log_blocked(blocked, "apply")

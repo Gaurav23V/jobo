@@ -399,6 +399,11 @@ def apply(
                 f"  Paused sites:       {result.paused} "
                 "(policy/paused_sites.py; kept for later, no attempt charged)"
             )
+        if result.captcha_parked:
+            click.echo(
+                f"  hCaptcha walls:     {result.captcha_parked} "
+                "(module4/captcha_walls.py; parked, no attempt charged)"
+            )
         if result.circuit_broken:
             click.echo(f"  Circuit-broken:     {result.circuit_broken}")
         if form_workers:

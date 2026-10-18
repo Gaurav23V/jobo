@@ -20,13 +20,16 @@ from __future__ import annotations
 
 import re
 
-from module4 import agent_driver, google_forms
+from module4 import agent_driver, captcha_walls, google_forms
 
 # status values that are permanent on their own
 _PERMANENT_STATUSES = {
     # Captcha solving is only available as a paid cloud service; the agent
     # cannot pass these, and a retry meets the same challenge.
     "captcha_failed",
+    # Only when it names no Oracle Cloud / iCIMS host: those are parked by the
+    # runner before this is asked (module4/captcha_walls.py).
+    "captcha_wall",
 }
 
 # A retry whose PREVIOUS failure was budget/time exhaustion already gets the
@@ -162,6 +165,8 @@ def permanent_reason(status: str | None, detail: str | None) -> str | None:
         return None
     if st == "captcha_failed" and _is_easy_apply_invisible_recaptcha(d):
         return None
+    if st == "captcha_wall" and captcha_walls.gate_host_in_text(d):
+        return None  # parked, not dropped: see module4/captcha_walls.py
     if st in _PERMANENT_STATUSES:
         return f"{st}: retries meet the same challenge"
     if _ESCALATED_BUDGET_STILL_EXHAUSTED.search(d):

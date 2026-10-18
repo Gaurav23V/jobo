@@ -1,0 +1,239 @@
+#!/usr/bin/env python
+"""hCaptcha sign-in walls are stopped fast and parked, not charged (GHO-54).
+
+1878 (Oracle Cloud) and 1934 (iCIMS), 2026-10-18: both met an hCaptcha image
+challenge on the email step in front of the application, spent 15 and 17
+model steps on it, and were dropped as captcha_failed. A fresh scratch browser
+met the same challenge on both sites, so it is the site, not our browser
+(module4/captcha_walls.py). The fixtures in scripts/fixtures/hcaptcha/ are the
+real page snapshots of those two runs with names, hosts and the email replaced.
+
+Offline: temporary SQLite DB, no browser, no model calls.
+
+    uv run python scripts/test_hcaptcha_walls.py
+"""
+from __future__ import annotations
+
+import datetime
+import importlib.util
+import json
+import sys
+import tempfile
+from contextlib import ExitStack
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+
+from db.models import Base, JobModel  # noqa: E402
+from module4 import agent_driver, blockers, budget_guard, captcha_walls, query, run_report, runner  # noqa: E402
+
+FIXTURES = Path(__file__).with_name("fixtures") / "hcaptcha"
+PLUGIN_DIR = REPO / "hermes_plugin" / "jobo-browser"
+ORACLE = "contoso.fa.oraclecloud.com"
+ICIMS = "careers-fabrikam.icims.com"
+
+PASS = 0
+FAIL = 0
+
+
+def check(label: str, cond: bool, extra: str = "") -> None:
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        print(f"  ok   {label}")
+    else:
+        FAIL += 1
+        print(f"  FAIL {label} {extra}")
+
+
+def _load(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _fixture(name: str) -> dict:
+    return json.loads((FIXTURES / f"{name}.json").read_text())
+
+
+def test_guard():
+    print("\n[1] captcha_guard on the real snapshots")
+    g = _load("jobo_hcaptcha_guard_test", PLUGIN_DIR / "captcha_guard.py")
+    g.reset_state()
+    oracle = _fixture("oracle_email_gate_challenge")
+    seen = g.observe("browser_snapshot", json.dumps(oracle))
+    check("Oracle challenge seen as hcaptcha", bool(seen) and seen[0] == "hcaptcha", str(seen and seen[0]))
+    check("Oracle: host taken from the frame tree, ends as captcha_wall",
+          bool(seen) and "STATUS: captcha_wall" in seen[1] and f"at {ORACLE}" in seen[1], seen and seen[1])
+    check("vision blocked while the challenge is up", bool(g.check_tool_call("browser_vision", {"question": "tiles?"})))
+    check("synthetic drags blocked too",
+          bool(g.check_tool_call("browser_cdp", {"method": "Input.dispatchMouseEvent", "params": {}})))
+
+    g.reset_state()
+    before = _fixture("icims_login_before_next")
+    check("iCIMS email step with only the invisible widget: no wall",
+          g.observe("browser_snapshot", json.dumps(before)) is None)
+    check("nothing blocked before the challenge", g.check_tool_call("browser_vision", {"question": "x"}) is None)
+    after = _fixture("icims_login_challenge")
+    after_click = {"success": True, "clicked": "e14", "snapshot": after["snapshot"]}  # no url, no frame tree
+    seen = g.observe("browser_navigate", json.dumps(after_click))
+    check("iCIMS drag challenge after Next: captcha_wall on the host seen last",
+          bool(seen) and "STATUS: captcha_wall" in seen[1] and f"at {ICIMS}" in seen[1], seen and seen[1])
+    g.observe("browser_snapshot", json.dumps(before))
+    check("challenge gone: vision allowed again", g.check_tool_call("browser_vision", {"question": "x"}) is None)
+
+    g.reset_state()
+    lever = dict(oracle, url="https://jobs.lever.co/example/123/apply")
+    seen = g.observe("browser_navigate", json.dumps(lever))
+    check("same challenge on a Lever form: stop now, but as captcha_failed (Lever challenges only some visitors)",
+          bool(seen) and "STATUS: captcha_failed" in seen[1] and "captcha_wall" not in seen[1], seen and seen[1])
+
+    check("plugin and module4 agree on the gate hosts",
+          tuple(g.GATE_HOST_SUFFIXES) == tuple(captcha_walls.GATE_HOST_SUFFIXES))
+
+    print("\n[2] plugin: the notice survives the snapshot filter")
+    plugin = _load("jobo_hcaptcha_plugin_test", PLUGIN_DIR / "__init__.py")
+    plugin.captcha_guard.reset_state()
+    out = json.loads(plugin._transform_tool_result("browser_snapshot", {}, json.dumps(oracle)))
+    check("notice at the top of the filtered snapshot",
+          str(out.get("snapshot", "")).startswith("[jobo: an hCaptcha image challenge"), str(out)[:200])
+    check("result tagged with the wall kind", out.get("jobo_captcha_wall") == "hcaptcha")
+
+
+def test_verdict_and_rules():
+    print("\n[3] verdict, retry rules, run-report signature")
+    v = agent_driver.parse_verdict(
+        f"STATUS: captcha_wall\nDETAIL: hCaptcha challenge on the email/sign-in step at {ORACLE}\nFIELDS_FILLED_JSON: {{}}"
+    )
+    check("captcha_wall is a valid agent status", v.status == "captcha_wall", v.status)
+    lever = agent_driver.parse_verdict("STATUS: captcha_wall\nDETAIL: hCaptcha challenge at jobs.lever.co\n")
+    check("captcha_wall on a non-gate host is read as captcha_failed", lever.status == "captcha_failed", lever.status)
+    check("a non-gate status never counts as parked",
+          not captcha_walls.is_parked("captcha_wall:hCaptcha challenge on jobs.lever.co"))
+    parked = captcha_walls.status_for(ORACLE, v.detail)
+    check("parked status is recognised", captcha_walls.is_parked(parked))
+    check("a parked status is never read back as a permanent drop",
+          blockers.permanent_reason_from_last_status(parked) is None)
+    check("captcha_wall naming no gate host is dropped like captcha_failed",
+          blockers.permanent_reason("captcha_wall", "hCaptcha at jobs.lever.co") is not None)
+    check("1878's real status is still a captcha:hcaptcha failure",
+          run_report.signature_for("captcha_failed:Oracle Cloud application gated by hCaptcha image challenge") == "captcha:hcaptcha")
+    sig = run_report.signature_for(parked)
+    check("a parked wall reports as captcha:wall_parked / needs_g",
+          sig == "captcha:wall_parked" and run_report.suggested_bucket(sig) == "needs_g", sig)
+    check("LinkedIn job URLs never mark a host as walled",
+          captcha_walls.own_host("https://www.linkedin.com/jobs/view/1/") == "")
+
+
+def _session():
+    engine = create_engine(f"sqlite:///{tempfile.mkdtemp()}/t.db")
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)()
+
+
+def _job(s, jid, url, *, attempts=0, last=None):
+    pdf = Path(tempfile.gettempdir()) / "jobo_hcaptcha_resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    j = JobModel(id=jid, company_name="Contoso", job_title="Software Engineer II", job_url=url,
+                 should_apply=True, applied=False, module2_enriched_at=datetime.datetime.now(),
+                 module3_resume_pdf_path=str(pdf), module4_attempts=attempts, module4_last_status=last)
+    s.add(j)
+    s.commit()
+    return j
+
+
+def _run(s, outcome, **kw):
+    spawned = []
+
+    def fake_agent(**k):
+        spawned.append(k["job_id"])
+        return outcome
+
+    with ExitStack() as st:
+        st.enter_context(patch.object(runner.browser_session, "ensure_browser_running", return_value="http://127.0.0.1:1"))
+        st.enter_context(patch.object(runner.browser_session, "ensure_healthy", return_value="http://127.0.0.1:1"))
+        st.enter_context(patch.object(runner.browser_session, "close_extra_tabs"))
+        st.enter_context(patch.object(runner.preflight, "check_job_open", return_value=SimpleNamespace(should_skip=False)))
+        st.enter_context(patch.object(runner.agent_driver, "run_apply_agent", side_effect=fake_agent))
+        st.enter_context(patch.object(runner.submission_audit, "write_audit_record"))
+        st.enter_context(patch.object(runner.circuit_breaker, "is_tripped", return_value=None))
+        st.enter_context(patch.object(runner.circuit_breaker, "record_failure"))
+        st.enter_context(patch.object(runner.linkedin_session, "check_session",
+                                      return_value=runner.linkedin_session.SessionState("signed_in", "test")))
+        st.enter_context(patch.object(runner.time, "sleep"))
+        # Never the real attach canary: it would start a Hermes agent.
+        res = runner.run_module4(s, budget_check=lambda: budget_guard.decide(None, 1.0),
+                                 attach_check=lambda *a: agent_driver.AttachCheck(True, "test"), **kw)
+    return res, spawned
+
+
+def test_runner():
+    print("\n[4] runner: park, charge nothing, skip next time")
+    wall = agent_driver.ApplyOutcome("captcha_wall", f"hCaptcha challenge on the email/sign-in step at {ORACLE}")
+    s = _session()
+    j = _job(s, 1878, f"https://{ORACLE}/hcmUI/CandidateExperience/en/sites/CX_1/job/1")
+    res, spawned = _run(s, wall)
+    s.refresh(j)
+    check("agent ran once", spawned == [1878], str(spawned))
+    check("no attempt charged", (j.module4_attempts or 0) == 0, str(j.module4_attempts))
+    check("still should_apply (parked, not dropped)", j.should_apply is True)
+    check("parked on the wall host", (j.module4_last_status or "").startswith(f"captcha_wall:{ORACLE} |"),
+          j.module4_last_status)
+    check("counted as captcha_parked, not failed", res.captcha_parked == 1 and res.failed == 0 and res.dropped == 0)
+
+    res, spawned = _run(s, wall)
+    check("next run: parked job not queued, no agent", spawned == [])
+    check("query skips it", [r.id for r in query.list_jobs_to_apply(s)] == [])
+    check("--job-id still reaches it (for testing a fix)",
+          [r.id for r in query.list_jobs_to_apply(s, job_id=1878)] == [1878])
+
+    print("\n[5] runner: another job on a walled host is parked before any agent")
+    j2 = _job(s, 1879, f"https://{ORACLE}/hcmUI/CandidateExperience/en/sites/CX_1/job/2")
+    j3 = _job(s, 1880, "https://www.linkedin.com/jobs/view/1880/")
+    ok = agent_driver.ApplyOutcome("submitted", "submitted")
+    res, spawned = _run(s, ok)
+    s.refresh(j2)
+    s.refresh(j3)
+    check("no agent for the walled host; the LinkedIn job still runs", spawned == [1880], str(spawned))
+    check("parked, uncharged", captcha_walls.is_parked(j2.module4_last_status) and not j2.module4_attempts,
+          j2.module4_last_status)
+    check("counted", res.captcha_parked == 1 and res.submitted == 1)
+
+    print("\n[6] runner: a LinkedIn job behind an iCIMS wall parks without walling linkedin.com")
+    s2 = _session()
+    j4 = _job(s2, 1934, "https://www.linkedin.com/jobs/view/1934/")
+    icims = agent_driver.ApplyOutcome("captcha_wall", f"hCaptcha challenge on the email/sign-in step at {ICIMS}")
+    _run(s2, icims)
+    s2.refresh(j4)
+    check("parked on the iCIMS host", (j4.module4_last_status or "").startswith(f"captcha_wall:{ICIMS} |"))
+    j5 = _job(s2, 1935, "https://www.linkedin.com/jobs/view/1935/")
+    _, spawned = _run(s2, ok)
+    check("other LinkedIn jobs are not parked", spawned == [1935], str(spawned))
+
+    print("\n[7] runner: captcha_wall with no gate host is an ordinary captcha drop")
+    s3 = _session()
+    j6 = _job(s3, 1936, "https://jobs.lever.co/example/1")
+    _run(s3, agent_driver.ApplyOutcome("captcha_wall", "hCaptcha challenge on jobs.lever.co"))
+    s3.refresh(j6)
+    check("charged and dropped, not parked",
+          j6.module4_attempts == 1 and j6.should_apply is False and not captcha_walls.is_parked(j6.module4_last_status),
+          f"{j6.module4_attempts} {j6.should_apply} {j6.module4_last_status}")
+
+
+def main() -> int:
+    test_guard()
+    test_verdict_and_rules()
+    test_runner()
+    print(f"\n{PASS}/{PASS + FAIL} passed")
+    return 1 if FAIL else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

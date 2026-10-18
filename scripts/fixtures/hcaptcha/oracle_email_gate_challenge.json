@@ -1,0 +1,29 @@
+{
+ "success": true,
+ "snapshot": "- generic\n  - link \"Skip to main content.\" [ref=e1]\n  - alert\n  - generic\n  - generic\n    - banner\n      - link \"Back to Job Details\" [ref=e6]\n        - StaticText \"\"\n      - tooltip \"Software Engineer II - Python ...\" [ref=e7] focusable [tabindex]\n        - StaticText \"Software Engineer II - Python\"\n        - StaticText \"...\"\n    - main \"Job application form\" [ref=e2]\n      - heading \"Job application form\" [level=1, ref=e4]\n      - form\n        - sectionheader\n          - heading \"Authentication screen. Enter your email address.\" [level=1, ref=e8]\n            - StaticText \"Authentication screen.\"\n            - StaticText \"Enter your email address.\"\n        - generic\n          - paragraph\n            - StaticText \"To get started, enter your email address. Your email address will be used to create and maintain your profile. If you are a current Contoso employee, use your Contoso email address to apply for jobs internally. If you are a current Contoso contractor or contingent worker (not paid by Contoso), please use your personal (not Contoso) email address. Failure to supply accurate and complete data can delay your recruiting process. You will be required to certify that the information you have provided is truthful prior to submitting your form. Information that cannot be verified will require documentation to support your entries.\"\n          - generic\n            - generic\n              - LabelText \"Email Address\"\n                - StaticText \"Email Address\"\n              - textbox \"Email Address\" [required, ref=e11]: candidate@example.com\n                - StaticText \"candidate@example.com\"\n            - generic\n            - StaticText \"This is how we'll communicate with you.\"\n            - LabelText\n              - checkbox \"I agree with the terms and conditions\" [checked=true, ref=e12]\n              - generic\n                - generic [ref=e13] clickable [cursor:pointer]\n                - StaticText \"I agree with the \"\n                - link \"terms and conditions\" [ref=e14]\n        - sectionfooter\n          - button \"Cancel\" [ref=e9]\n            - StaticText \"CANCEL\"\n          - button \"Next\" [ref=e10]\n            - StaticText \"NEXT\"\n  - generic\n    - Iframe \"hCaptcha challenge\" [ref=e5]\n      - generic\n        - LayoutTable\n          - generic\n            - heading \"Click on the TWO shortest towers\" [level=2, ref=e20]\n            - paragraph\n        - image \"Image-based CAPTCHA challenge. Please use the 'Accessibility: Retrieve Cookie' or 'Accessibility: Text Challenge' options if available in the challenge menu.\"\n        - generic\n          - generic\n          - button \"Skip Challenge, page 1 of 2\" [ref=e15]\n            - StaticText \"Skip\"\n        - generic\n          - button \"EN - English, Select a language\" [ref=e19]\n          - button \"About hCaptcha & Accessibility Options\" [expanded=false, ref=e16]\n          - button \"Refresh Challenge.\" [ref=e17]\n          - button \"hCaptcha logo, opens new window with more information\" [ref=e18]\n    - generic [ref=e3] clickable [cursor:pointer]",
+ "frame_tree": {
+  "top": {
+   "url": "https://contoso.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210795478",
+   "origin": "https://contoso.fa.oraclecloud.com",
+   "is_oopif": false
+  },
+  "children": [
+   {
+    "url": "about:blank",
+    "origin": "://",
+    "is_oopif": false
+   },
+   {
+    "url": "",
+    "origin": "",
+    "is_oopif": true
+   },
+   {
+    "url": "",
+    "origin": "",
+    "is_oopif": true
+   }
+  ],
+  "truncated": false
+ }
+}
