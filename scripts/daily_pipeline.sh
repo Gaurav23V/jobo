@@ -74,9 +74,22 @@ write_verdict() {
   stages_json+="]"
   local budget_json=""
   if [ -n "$budget" ]; then budget_json=",\"budget\":$budget"; fi
+  VERDICT_TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
   printf '{"ts":"%s","overall":"%s","stages":%s%s,"log":"%s"}\n' \
-    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$overall" "$stages_json" "$budget_json" "$LOG" >> "$VERDICT_LOG"
+    "$VERDICT_TS" "$overall" "$stages_json" "$budget_json" "$LOG" >> "$VERDICT_LOG"
 }
+
+# After every run that ran a stage, a signed POST opens the post-run review
+# task (GHO-44, scripts/lib_review_webhook.sh). Not on SKIPPED_OVERLAP or
+# SKIPPED_BUDGET: no stage ran, there is nothing to review. It never changes
+# the exit code or the verdict.
+VERDICT_TS=""
+if [ -f "$REPO/scripts/lib_review_webhook.sh" ]; then
+  # shellcheck source=lib_review_webhook.sh
+  . "$REPO/scripts/lib_review_webhook.sh"
+else
+  notify_review() { log "review webhook: skipped (scripts/lib_review_webhook.sh missing)"; }
+fi
 
 # Overlap guard: never run two pipelines concurrently. A long apply stage
 # used to survive into the next cron slot, so 10:00/22:00 runs stacked up
@@ -176,6 +189,7 @@ if ! run_stage "collector" collector --hours 168; then FAILED=1; fi
 if grep -qE 'invalid_grant|Requested entity was not found|HttpError 401' "$LOG"; then
   log "Gmail auth appears expired. Run: cd $REPO && uv run python auth_manual.py"
   write_verdict "FAILED_GMAIL_AUTH"
+  notify_review "FAILED_GMAIL_AUTH"
   exit 2
 fi
 
@@ -205,6 +219,7 @@ if ! budget_gate "triage"; then
   STAGE_VERDICTS+=("triage:SKIPPED_BUDGET" "apply:SKIPPED_BUDGET")
   log "=== run stopped before triage: Claude budget line reached (50% weekly or 30% of the 5h session) ==="
   write_verdict "STOPPED_BUDGET"
+  notify_review "STOPPED_BUDGET"
   exit $FAILED
 fi
 
@@ -242,8 +257,10 @@ if ! run_stage "apply" apply --form-workers "$FORM_WORKERS"; then FAILED=1; fi
 if [ "$FAILED" -eq 0 ]; then
   log "=== run complete, failed=0 ==="
   write_verdict "OK"
+  notify_review "OK"
 else
   log "=== run complete WITH PROBLEMS, failed=$FAILED - read the stage lines above ==="
   write_verdict "FAILED"
+  notify_review "FAILED"
 fi
 exit $FAILED

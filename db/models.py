@@ -133,3 +133,37 @@ class JobModel(Base):
             module3_resume_pdf_path=self.module3_resume_pdf_path,
             module3_cover_pdf_path=self.module3_cover_pdf_path,
         )
+
+
+class FailureLedgerModel(Base):
+    """One recurring apply failure: a failure signature on one ATS host (GHO-44).
+
+    `jobo run-report` keeps the seen-counts current from failure_ledger_runs;
+    bucket/issue/fix_commit/status are triage fields set by `jobo ledger set`.
+    """
+
+    __tablename__ = "failure_ledger"
+
+    signature = Column(String, primary_key=True)
+    ats_host = Column(String, primary_key=True)
+    first_seen = Column(String, nullable=True)  # run ts (ISO, UTC) of the first run
+    last_seen = Column(String, nullable=True)
+    seen_runs = Column(Integer, nullable=False, default=0)
+    job_count = Column(Integer, nullable=False, default=0)  # distinct job ids
+    bucket = Column(String, nullable=True)  # temporary / fixable / needs_g
+    issue = Column(String, nullable=True)  # Paperclip identifier, e.g. GHO-57
+    fix_commit = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="open")
+    updated_at = Column(DateTime, nullable=False, default=func.now())
+
+
+class FailureLedgerRunModel(Base):
+    """Which jobs hit a (signature, host) in one run; makes the ledger idempotent."""
+
+    __tablename__ = "failure_ledger_runs"
+
+    signature = Column(String, primary_key=True)
+    ats_host = Column(String, primary_key=True)
+    run_log = Column(String, primary_key=True)
+    run_ts = Column(String, nullable=False)
+    job_ids_json = Column(Text, nullable=False, default="[]")
