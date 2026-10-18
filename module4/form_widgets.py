@@ -193,8 +193,16 @@ WIDGET_JS = r"""
       // an opaque id. Clicking it either invents a value (Wolters Kluwer added
       // the skill "Zzzqx Nonsense") or silently does nothing (GEA). Never pick it.
       const isEcho=n=>{const row=n.closest('[role=option]');return !!row && row.id==='menuItem-'+String(want);};
-      const leaves=()=>lists().flatMap(l=>[...l.querySelectorAll('[data-automation-id=promptLeafNode]')])
+      const rows=()=>lists().flatMap(l=>[...l.querySelectorAll('[data-automation-id=promptLeafNode]')])
         .filter(n=>visible(n)&&!isEcho(n)&&!/^no items\.?$/i.test((n.innerText||'').trim()));
+      // Two-level prompts ("How Did You Hear About Us?", GHO-55):
+      // a category row has a side chevron and no radio. Clicking it opens the
+      // category's own options; it is never a value. Rows from a list that was
+      // on screen before our last gesture are stale and never matched.
+      const isGroup=n=>n.getAttribute('data-uxi-multiselectlistitem-hassidecharm')==='true';
+      let stale=new Set();
+      const leaves=()=>rows().filter(n=>!isGroup(n)&&!stale.has(n));
+      const groups=()=>rows().filter(n=>isGroup(n)&&!stale.has(n));
       // Close the results list so it cannot cover the next field. Workday
       // ignores Escape and blur(); Tab closes it, but on free-text prompts
       // (GEA Skills) Tab also turns leftover search text into a pill. So empty
@@ -206,10 +214,77 @@ WIDGET_JS = r"""
         if(lists().length) { yield {node:el, key:'Tab'}; await sleep(400); }
       }
       const leafText=n=>(n.querySelector('[data-automation-id=promptOption]')?.innerText||n.innerText||'').trim();
+      // The list is virtualised: only rows in view exist ("Social Media" was
+      // not in the DOM until scrolled). Walk it by scrolling the list itself;
+      // stop at the first row named `match`, else return every name seen.
+      const walk=async(get,match)=>{
+        const seen=[];
+        const list=lists().find(l=>get().some(n=>l.contains(n)));
+        if(!list) return {seen};
+        list.scrollTop=0; await sleep(150);
+        for(let i=0;i<60;i++) {
+          for(const n of get()) {
+            const t=leafText(n);
+            if(match && norm(t)===match) return {seen,row:n};
+            if(!seen.includes(t)) seen.push(t);
+          }
+          if(list.scrollTop+list.clientHeight>=list.scrollHeight-1) break;
+          list.scrollTop+=Math.max(32,Math.floor(list.clientHeight*.75)); await sleep(150);
+        }
+        return {seen};
+      };
+      // Click the exact option row and confirm its pill.
+      async function* choose(target) {
+        const name=norm(leafText(target));
+        // The results list is virtualised: scrolling re-renders rows, so bring
+        // the match into view first, then re-find it and click the live row.
+        for(let i=0;i<6;i++) {
+          target.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+          await sleep(200);
+          const again=leaves().filter(n=>norm(leafText(n))===name);
+          if(again.length!==1) continue;
+          target=again[0];
+          const r=target.getBoundingClientRect();
+          const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+          if(top && (top===target || target.contains(top))) break;
+        }
+        const text=leafText(target);
+        yield {node:target};
+        await sleep(650);
+        if(!valid()) return invalid();
+        const picked=pills().find(t=>norm(t)===norm(text));
+        yield* closeList();
+        return picked ? {...out, ok:true, readback:picked, note:''} :
+          {...out, ok:false, reverted:true, readback:pills().join(', '), note:'widget selection did not persist on the exact control'};
+      }
+      // Open a category and pick its option named `name`; otherwise offer
+      // that category's own options (never the category itself).
+      async function* inGroup(row, name) {
+        const group=leafText(row);
+        stale=new Set(rows());
+        yield {node:row};
+        for(let i=0;i<20 && !leaves().length;i++) await sleep(150);
+        const {seen,row:hit}=await walk(leaves,norm(name));
+        if(hit) return yield* choose(hit);
+        yield* closeList();
+        return {...fail('"'+group+'" is a group of options in this list, not a value itself; pick one of its options'),
+          noMatch:true, emptyRemote:seen.length===0, availableOptions:seen.slice(0,40)};
+      }
       const pillsBefore=new Set(pills().map(norm));
       yield {node:el};
+      // That click's own list lands ~600 ms later. Typing before it arrived
+      // let it replace the search results, and the "Job Board" CATEGORY row
+      // got clicked instead of the "Job Board" option (GHO-55, 2026-10-18).
+      for(let i=0;i<13 && !lists().length;i++) await sleep(150);
       await sleep(150);
       if(el.getRootNode().activeElement!==el) el.focus();
+      // "Category > Option" names one option inside one category.
+      const path=String(want).split(/\s+>\s+/);
+      if(path.length===2 && path.every(p=>norm(p)) && groups().length) {
+        const {row}=await walk(groups,norm(path[0]));
+        if(row) return yield* inGroup(row,path[1]);
+      }
+      stale=new Set(rows());
       // Clear whatever search text is left from an earlier pick, then type.
       yield {node:el, key:'type', text:want, clear:true};
       let found=[];
@@ -228,33 +303,22 @@ WIDGET_JS = r"""
         if(found.some(n=>norm(leafText(n))===wantN)) break;
       }
       const matches=found.filter(n=>norm(leafText(n))===wantN);
+      if(!matches.length && groups().length) {
+        // Search never matches a category name ("Social Media"); Workday
+        // shows "No matches found" over the category list instead.
+        const {seen,row}=await walk(groups,wantN);
+        if(row) return yield* inGroup(row,want);
+        yield* closeList();
+        return {...fail('no matching option in this control\'s own list; these are its groups, each opens its own options'),
+          noMatch:true, emptyRemote:seen.length===0, availableOptions:seen.slice(0,40)};
+      }
       if(matches.length!==1) {
         const offered=found.map(leafText).slice(0,40);
         yield* closeList();
         return {...fail(matches.length ? 'ambiguous exact options' : 'no matching option in this control\'s own list'),
           noMatch:true, emptyRemote:offered.length===0, availableOptions:offered};
       }
-      // The results list is virtualised: scrolling re-renders rows, so bring
-      // the match into view first, then re-find it and click the live row.
-      let target=matches[0];
-      for(let i=0;i<6;i++) {
-        target.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
-        await sleep(200);
-        const again=leaves().filter(n=>norm(leafText(n))===wantN);
-        if(again.length!==1) continue;
-        target=again[0];
-        const r=target.getBoundingClientRect();
-        const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-        if(top && (top===target || target.contains(top))) break;
-      }
-      const text=leafText(target);
-      yield {node:target};
-      await sleep(650);
-      if(!valid()) return invalid();
-      const picked=pills().find(t=>norm(t)===norm(text));
-      yield* closeList();
-      return picked ? {...out, ok:true, readback:picked, note:''} :
-        {...out, ok:false, reverted:true, readback:pills().join(', '), note:'widget selection did not persist on the exact control'};
+      return yield* choose(matches[0]);
     }
     out.strategy='calendar-picker';
     let year, month=null, match;
@@ -373,18 +437,27 @@ WIDGET_JS = r"""
         await sleep(tries ? 150 : 90);
         if(shown()) break;
       }
-      if(!valid()||!ownsSurface(node,s)||!node.isConnected||!nodeIdentity(node).every((v,i)=>v===identity[i])) return {done:true,result:invalid()};
-      const r=s.getBoundingClientRect();
-      for(const [fx,fy] of [[.5,.5],[.15,.5],[.85,.5]]) {
-        const x=r.left+r.width*fx,y=r.top+r.height*fy;
-        let top=document.elementFromPoint(x,y);
-        while(top?.shadowRoot) {const deep=top.shadowRoot.elementFromPoint(x,y);if(!deep||deep===top)break;top=deep;}
-        if(!hitOwns(s,top)) continue;
-        if(check&&!ownsHit(node,top)) continue;
-        if(key) node.focus();
-        pending={node,s,x,y,key,check,identity};
-        if(!guard()) return {done:true,result:invalid()};
-        return {done:false,x,y,key:key||null,text:text||null,clear:!!clear,noEnter:!!noEnter};
+      // Workday's option rows get pointer-events:none while their list
+      // scrolls: the hit lands on the list itself until it settles, ~0.3 s
+      // headless but 1-1.6 s in the headed apply window ("How Did You
+      // Hear", GHO-55). Wait without scrolling again: up to 3 s while
+      // the target itself ignores the pointer, ~0.7 s for anything else.
+      const settleUntil=performance.now()+3000;
+      for(let settle=0;settle<6 || (getComputedStyle(s).pointerEvents==='none' && performance.now()<settleUntil);settle++) {
+        if(settle) await sleep(120);
+        if(!valid()||!ownsSurface(node,s)||!node.isConnected||!nodeIdentity(node).every((v,i)=>v===identity[i])) return {done:true,result:invalid()};
+        const r=s.getBoundingClientRect();
+        for(const [fx,fy] of [[.5,.5],[.15,.5],[.85,.5]]) {
+          const x=r.left+r.width*fx,y=r.top+r.height*fy;
+          let top=document.elementFromPoint(x,y);
+          while(top?.shadowRoot) {const deep=top.shadowRoot.elementFromPoint(x,y);if(!deep||deep===top)break;top=deep;}
+          if(!hitOwns(s,top)) continue;
+          if(check&&!ownsHit(node,top)) continue;
+          if(key) node.focus();
+          pending={node,s,x,y,key,check,identity};
+          if(!guard()) return {done:true,result:invalid()};
+          return {done:false,x,y,key:key||null,text:text||null,clear:!!clear,noEnter:!!noEnter};
+        }
       }
     }
     return {done:true,result:fail('exact widget is obscured or has no safe hit-test point')};

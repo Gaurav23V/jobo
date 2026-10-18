@@ -1,0 +1,153 @@
+<!doctype html>
+<!--
+Local copy of Workday's two-level "How Did You Hear About Us?" prompt, as
+measured on a live Workday application form (2026-10-18/19, nothing
+saved or submitted). Markup attributes are the real ones.
+  * Clicking the search box opens the CATEGORY list ~600 ms later. Categories
+    are rows with data-uxi-multiselectlistitem-hassidecharm="true" and no
+    radio; clicking one does not pick it, it replaces the rows with that
+    category's own options (radio rows, hassidecharm="false").
+  * Typing removes the popup at once; Enter rebuilds it ~300 ms later with
+    "Search Results" (option rows only), or with "No matches found" over the
+    category list again. Search never matches a category name.
+  * The category list is virtualised: only the rows in view exist, and
+    scrolling re-renders them as new nodes ("Social Media" is not in the DOM
+    until the list is scrolled). While it scrolls, and after (~0.3 s
+    headless, 1-1.6 s in the headed apply window), rows have
+    pointer-events:none: a hit lands on the list itself.
+  * Single select: clicking an option row adds the one pill, closes the list.
+-->
+<html><head><meta charset="utf-8"><title>workday source prompt</title>
+<style>
+  body{font:14px sans-serif;margin:20px;padding-bottom:120px}
+  .wd-field{margin:14px 0}
+  .box{position:relative;width:320px;border:1px solid #888;min-height:36px}
+  .box input{width:300px;height:30px;border:0}
+  .pills{margin:0;padding:0;list-style:none}
+  .popup{position:absolute;background:#fff;border:1px solid #888;width:340px;z-index:20}
+  .popup [data-automation-id=activeListContainer]{max-height:288px;overflow-y:auto;position:relative}
+  .popup [role=option]{height:32px;line-height:32px;padding-left:6px;cursor:pointer;position:absolute;left:0;right:0}
+  .popup [data-automation-id=promptLeafNode]{display:flex;align-items:center;gap:6px;height:32px}
+  .footer{position:fixed;left:0;right:0;bottom:0;height:70px;background:#eee;z-index:10}
+</style></head><body>
+
+<h3>My Information</h3>
+<div data-automation-id="formField-source" data-fkit-id="source--source" class="wd-field">
+  <label for="source--source"><span>How Did You Hear About Us?<abbr aria-hidden="true">*</abbr></span></label>
+  <div data-automation-id="multiSelectContainer" data-uxi-widget-type="multiselect">
+    <div class="box" data-automation-id="multiselectInputContainer">
+      <div data-automation-hiddensearch="false">
+        <input placeholder="Search" aria-required="true" autocomplete="off" data-uxi-widget-type="selectinput" id="source--source" value="">
+        <div data-automation-id="promptAriaInstruction" aria-hidden="true">0 items selected</div>
+      </div>
+      <div><ul class="pills" role="listbox" data-automation-id="selectedItemList" aria-label="items selected"></ul></div>
+    </div>
+  </div>
+</div>
+<div data-automation-id="formField-country" class="wd-field">
+  <label for="city">City</label>
+  <input id="city" type="text" value="">
+</div>
+<div class="footer"></div>
+
+<script>
+const TREE = [
+  ['Billboard', ['Billboard']], ['Career Fair', ['Career Fair']], ['Community Event', ['Community Event']],
+  ['Current or Former Contingent Worker', ['Current or Former Contingent Worker']],
+  ['Direct Source', ['Direct Source', 'State Job Board']], ['Email/Text Campaign', ['Email/Text Campaign']],
+  ['Employee', ['Employee']], ['External Career Site', ['External Career Site']], ['Indeed', ['Indeed']],
+  ['Job Board', ['Job Board']], ['Magazines and Trade Publications', ['Magazines and Trade Publications']],
+  ['Mailer', ['Mailer']], ['Monster', ['Monster']], ['Newspaper', ['Newspaper']], ['Other', ['Other']],
+  ['Professional Associations', ['Professional Associations']], ['Radio Ad', ['Radio Ad']], ['Referral', ['Referral']],
+  ['Social Media', ['Facebook', 'Glassdoor', 'LinkedIn', 'YouTube']], ['Social Share', ["LinkedIn Group Post"]],
+  ['Acme Career Site', ['Acme Career Site']], ['University/College', ['University/College']],
+];
+// #no-other: a tenant without the generic "Other" group.
+if (location.hash === '#no-other') TREE.splice(TREE.findIndex(([c]) => c === 'Other'), 1);
+const LEAVES = TREE.flatMap(([, ls]) => ls);
+const input = document.getElementById('source--source');
+const box = input.closest('[data-automation-id=multiselectInputContainer]');
+const pills = box.querySelector('[data-automation-id=selectedItemList]');
+const aria = box.querySelector('[data-automation-id=promptAriaInstruction]');
+let popup = null, seq = 0;
+window.__picks = [];
+const close = () => { if (popup) { popup.remove(); popup = null; } };
+const pick = t => {
+  window.__picks.push(t);
+  pills.innerHTML = '<li role="presentation" data-automation-id="menuItem"><div role="option" data-automation-id="selectedItem">' +
+    '<div data-automation-id="DELETE_charm" aria-hidden="true"><span></span></div><p data-automation-id="promptOption"></p></div></li>';
+  pills.querySelector('p').textContent = t;
+  pills.querySelector('p').setAttribute('data-automation-label', t);
+  aria.textContent = '1 item selected, ' + t;
+  close();
+};
+// rows: [[text, isCategory]]; only the rows inside the scrolled window exist.
+const show = (title, rows) => {
+  close();
+  popup = document.createElement('div');
+  popup.className = 'popup'; popup.setAttribute('data-automation-id', 'responsiveMonikerPrompt');
+  popup.innerHTML = '<div data-automation-id="promptTitle"></div><div data-automation-id="activeListContainer" role="listbox" aria-label="Options Expanded"><div role="presentation"></div></div>';
+  popup.firstChild.textContent = title;
+  const list = popup.querySelector('[data-automation-id=activeListContainer]');
+  const inner = list.firstChild;
+  inner.style.height = (rows.length * 32) + 'px'; inner.style.position = 'relative';
+  // Keyed like a React list: rows that stay in view keep their nodes, rows
+  // scrolled out are dropped, rows scrolled in are new nodes.
+  const live = new Map();
+  const render = () => {
+    const first = Math.floor(list.scrollTop / 32), last = Math.min(rows.length, first + 12);
+    for (const [i, node] of live) if (i < first || i >= last) { node.remove(); live.delete(i); }
+    for (let i = first; i < last; i++) {
+      if (live.has(i)) continue;
+      const [t, cat] = rows[i];
+      const row = document.createElement('div');
+      row.setAttribute('role', 'option'); row.setAttribute('data-automation-id', 'menuItem');
+      row.id = 'menuItem-' + (cat ? 'c' : 'l') + i + '-' + seq;
+      row.setAttribute('aria-label', t + ' not checked'); row.style.top = (i * 32) + 'px';
+      row.innerHTML = '<div data-automation-id="promptLeafNode" data-uxi-widget-type="multiselectlistitem"' +
+        ' data-uxi-multiselectlistitem-type="' + (cat ? 2 : 1) + '" data-uxi-multiselectlistitem-hassidecharm="' + cat + '">' +
+        (cat ? '' : '<input type="radio" data-automation-id="radioBtn" tabindex="-1">') +
+        '<div data-automation-id="promptOption"></div>' + (cat ? '<span>&gt;</span>' : '') + '</div>';
+      const opt = row.querySelector('[data-automation-id=promptOption]');
+      opt.textContent = t; opt.setAttribute('data-automation-label', t);
+      row.addEventListener('click', () => cat ? setTimeout(() => drill(t), 300) : pick(t));
+      inner.appendChild(row); live.set(i, row);
+    }
+  };
+  // Rows ignore the pointer while the list scrolls and for a moment after.
+  let still = null;
+  list.addEventListener('scroll', () => {
+    inner.style.pointerEvents = 'none';
+    clearTimeout(still); still = setTimeout(() => { inner.style.pointerEvents = ''; }, 1200);
+    render();
+  });
+  render();
+  const r = box.getBoundingClientRect();
+  popup.style.left = (r.left + scrollX) + 'px'; popup.style.top = (r.bottom + scrollY) + 'px';
+  document.body.appendChild(popup);
+};
+const categories = () => show('', TREE.map(([c]) => [c, true]));
+const drill = c => { seq++; show(c, TREE.find(([n]) => n === c)[1].map(t => [t, false])); };
+// The opening click's list lands late, even over search results typed meanwhile.
+input.addEventListener('mousedown', () => setTimeout(() => { seq++; categories(); }, 600));
+input.addEventListener('input', () => close());
+input.addEventListener('keydown', ev => {
+  if (ev.key === 'Tab') { close(); return; }
+  if (ev.key === 'Escape') return;  // Workday ignores Escape here
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  const q = input.value.trim().toLowerCase();
+  close();
+  setTimeout(() => {
+    seq++;
+    const hits = q ? LEAVES.filter(t => t.toLowerCase().includes(q)) : [];
+    if (hits.length) show('Search Results', hits.map(t => [t, false]));
+    else if (q) show('No matches found', TREE.map(([c]) => [c, true]));
+    else categories();
+  }, 300);
+});
+document.addEventListener('mousedown', ev => {
+  if (popup && !popup.contains(ev.target) && !box.contains(ev.target)) close();
+});
+</script>
+</body></html>
