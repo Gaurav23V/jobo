@@ -171,13 +171,47 @@ def _host_of(url: str) -> str:
         return ""
 
 
-def domains_related(asked: str, link_host: str) -> bool:
+# One ATS vendor, several unrelated-looking domains. A suffix counts when the
+# host IS it or ends in ".<suffix>". auth0app.com is shared by every Auth0
+# tenant, so only UKG's own tenant label is listed, never the bare domain.
+_ATS_FAMILIES = (
+    # Job 794, 2026-09-24: asked successfactors.com, the link was on sapsf.com.
+    ("successfactors.com", "successfactors.eu", "sapsf.com", "sapsf.eu"),
+    # Job 693, 2026-10-02: asked ultipro.com, the link was on
+    # signin-us.ukg-prod.auth0app.com.
+    ("ultipro.com", "ukg.com", "ukg.net", "ukg-prod.auth0app.com"),
+)
+
+
+def _on_suffix(host: str, suffix: str) -> bool:
+    return host == suffix or host.endswith("." + suffix)
+
+
+def _ats_family(host: str) -> Optional[tuple[str, ...]]:
+    host = (host or "").lower()
+    for family in _ATS_FAMILIES:
+        if any(_on_suffix(host, s) for s in family):
+            return family
+    return None
+
+
+def _sender_host(sender: str) -> str:
+    m = re.search(r"@([A-Za-z0-9.-]+)", sender or "")
+    return m.group(1).lower() if m else ""
+
+
+def domains_related(asked: str, link_host: str, sender: str = "") -> bool:
     """True when a reset link plausibly belongs to the service asked about.
 
     Deliberately permissive about SUBDOMAINS and identity providers (an SAP
     portal mails from successfactors.eu, Workday from myworkday.com) but strict
     about unrelated registrable domains - handing back someone else's reset
     link would be a security bug.
+
+    `sender` is the mail's From. When the agent names the employer's own
+    domain, a link on a known ATS vendor (_ATS_FAMILIES) counts only if that
+    employer sent the mail (job 794: asked the employer's domain, the reset
+    mail came from it, the link was on a sapsf.com host).
     """
     asked_host = _host_of(asked) or asked.lower().strip()
     a = _registrable(asked_host)
@@ -185,6 +219,11 @@ def domains_related(asked: str, link_host: str) -> bool:
     if not a or not b:
         return False
     if a == b:
+        return True
+    family = _ats_family(link_host)
+    if family and _ats_family(asked_host) == family:
+        return True
+    if family and _registrable(_sender_host(sender)) == a:
         return True
     # Brand-token relatedness, for identity providers on their own domain
     # (an SAP portal mails from successfactors.eu, Workday from myworkday.com).
@@ -214,7 +253,9 @@ def score_url(url: str, context: str = "") -> int:
     # reset link.
     if re.search(r"[?&](token|code|key|t|otl|guid|nonce)=[A-Za-z0-9._%-]{12,}", u):
         score += 25
-    elif re.search(r"/[A-Za-z0-9._-]{24,}(/|$)", u):
+    # "~" too: iCIMS wraps its reset link in a click tracker,
+    # clicks.icims.eu/f/a/<token>~~/<id>~/<token>~~ (job 1425).
+    elif re.search(r"/[A-Za-z0-9._~-]{24,}(/|$)", u):
         score += 12
     if context:
         score += 5
@@ -225,7 +266,9 @@ def score_url(url: str, context: str = "") -> int:
     return score
 
 
-def extract_reset_url(text: str, *, expect_domain: str = "") -> tuple[Optional[str], int]:
+def extract_reset_url(
+    text: str, *, expect_domain: str = "", sender: str = ""
+) -> tuple[Optional[str], int]:
     """Pull the best reset link out of an email body.
 
     Returns (url_or_None, candidates_seen).
@@ -246,7 +289,7 @@ def extract_reset_url(text: str, *, expect_domain: str = "") -> tuple[Optional[s
     lowered = text.lower()
     best, best_score = None, 0
     for u in urls:
-        if expect_domain and not domains_related(expect_domain, _host_of(u)):
+        if expect_domain and not domains_related(expect_domain, _host_of(u), sender):
             continue
         # Context bonus: reset wording within ~200 chars before the link.
         idx = lowered.find(u.lower())
@@ -322,7 +365,7 @@ def find_reset_link(
             continue
 
         body = mail_text(otp_lookup._walk_body(msg.get("payload", {}), keep_html=True))
-        url, n = extract_reset_url(body, expect_domain=domain)
+        url, n = extract_reset_url(body, expect_domain=domain, sender=sender)
         if url:
             logger.info(
                 "password_reset: found a reset link for %s in %r (%d candidate URLs)",

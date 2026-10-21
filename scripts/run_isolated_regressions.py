@@ -76,7 +76,7 @@ SUITES = (
     'test_apply_speed', 'test_avature_stale_numbers',
     'test_setup_wizard', 'test_source_dedup', 'test_jobfound_source',
     'test_jobfound_stages', 'test_run_report', 'test_hcaptcha_walls',
-    'test_emailed_mail_lookup',
+    'test_emailed_mail_lookup', 'test_reset_link_hosts',
     'test_workday_source_prompt', 'test_workday_step_budget',
     'test_external_resume_gate',
     'test_email_apply',

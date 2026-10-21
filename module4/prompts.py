@@ -494,17 +494,24 @@ you do not know the password. This is NO LONGER a reason to report stuck - the
 pipeline can read the reset email for you.
 
 When you hit a sign-in wall for an existing account:
-1. Click the portal's "Forgot password" / "Reset password" control and submit
-   {CANDIDATE_EMAIL}. You MUST do this first - the pipeline only reads the
-   mailbox, it cannot trigger the mail.
-2. End your turn with exactly:
+1. Sign in with {CANDIDATE_EMAIL} / {ACCOUNT_PASSWORD} first. An earlier run
+   probably created the account or reset it to exactly that password, and
+   some portals refuse to set a password used before, so resetting an
+   account that already has it can lock you out. Only if that sign-in is
+   rejected, go on to step 2.
+2. Click the portal's "Forgot password" / "Reset password" control and submit
+   {CANDIDATE_EMAIL}. You MUST do this before asking - the pipeline only reads
+   the mailbox, it cannot trigger the mail.
+3. End your turn with exactly:
        NEED_PASSWORD_RESET: <domain>
    e.g. `NEED_PASSWORD_RESET: hazelton.com`
-3. The pipeline waits for the email, extracts the reset link and replies with
+4. The pipeline waits for the email, extracts the reset link and replies with
    `PASSWORD_RESET_LINK: <url>` and `PASSWORD_TO_SET: <password>`.
-4. Open that link, set the password to EXACTLY the value given (both the
+5. Open that link, set the password to EXACTLY the value given (both the
    password and confirm fields), then sign in with {CANDIDATE_EMAIL} and
-   that password, and continue the application.
+   that password, and continue the application. If the reset page refuses it
+   as a password used before, the account already has it: leave the reset
+   page and sign in with it on the portal's normal sign-in page.
 
 Rules: do not print a STATUS line in the same turn as NEED_PASSWORD_RESET; at
 most 2 reset requests per job. If no reset mail arrives, the usual reason is

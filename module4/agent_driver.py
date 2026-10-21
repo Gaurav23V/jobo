@@ -1314,7 +1314,9 @@ def _resolve_password_reset(line: str, *, job_id: int) -> str:
         "confirm-password fields), then sign in with "
         f"{personal.email()} / {result.password} and continue the application. "
         "This is now the account's real password, so do not request another reset "
-        "for this domain."
+        "for this domain. If the reset page refuses it as a password used before, "
+        "the account already has it: leave the reset page and sign in with "
+        f"{personal.email()} / {result.password} on the normal sign-in page."
     )
 
 
