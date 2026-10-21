@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply by email for mailto-only postings (GHO-67).
 
-Natton AI 1684 and DawerOne 1844 had no web form, only a mailto link, and
+Proseware AI 1684 and Lamna 1844 had no web form, only a mailto link, and
 ended `stuck`. The verdict, the email (drafted or sent through a fake Gmail
 service, never the real one) and the runner's bookkeeping are checked here,
 using the two jobs' real agent output.
@@ -41,19 +41,19 @@ def check(label: str, ok: bool, note: str = "") -> None:
     print(f"  {'PASS' if ok else 'FAIL'}  {label:64s} {note if not ok else ''}")
 
 
-# Verbatim from the 2026-10-17 DawerOne 1844 session (truncated body).
-DAWER_HREF = (
-    "mailto:careers@dawerone.com?subject=Application%3A%20Backend%20and%20Infrastructure%20"
-    "Engineer%20%E2%80%93%20%5BYour%20name%5D&body=Hi%20DawerOne%20team%2C%0A%0AI%20would%20"
+# Verbatim from the 2026-10-17 Lamna 1844 session (truncated body).
+LAMNA_HREF = (
+    "mailto:careers@lamna.example?subject=Application%3A%20Backend%20and%20Infrastructure%20"
+    "Engineer%20%E2%80%93%20%5BYour%20name%5D&body=Hi%20Lamna%20team%2C%0A%0AI%20would%20"
     "like%20to%20apply%20for%20this%20role.%0A%0AName%3A%0A1.%20Describe%20a%20production%20"
-    "backend.%0AAnswer%3A%0A"
+    "backend.%0AAnswer%3A%0AEarliest%20start%20date%20(DD%2FMM%2FYYYY)%3A%0A2.%20Name%20an%20alarm.%0AAnswer%3A%0A"
 )
-NATTON_STUCK = (
-    'Natton.ai posting has no web application form, only "Apply via email" '
-    "(mailto:careers@natton.ai) requiring sending an email with CV attached, which this "
+PROSEWARE_STUCK = (
+    'Proseware posting has no web application form, only "Apply via email" '
+    "(mailto:careers@proseware.example) requiring sending an email with CV attached, which this "
     "browser-based agent cannot do"
 )
-DAWER_STUCK = (
+LAMNA_STUCK = (
     "Job posting has no web application form, only a mailto: link requiring manual email "
     "composition with resume attachment — no mechanism exists to submit via browser automation"
 )
@@ -99,7 +99,10 @@ def _good_body(**_k):
     name = personal.full_name()
     return email_apply.EmailDraft(
         subject=f"Application: Backend and Infrastructure Engineer – {name}",
-        body=f"Hi DawerOne team,\n\nI would like to apply.\n\n1. Answer: a Go service.\n\nThanks,\n{name}",
+        body=(f"Hi Lamna team,\n\nI would like to apply for this role.\n\nName: {name}\n\n"
+              f"1. Describe a production backend.\nAnswer: a Go service.\n"
+              f"Earliest start date (DD/MM/YYYY): 21/11/2026\n2. Name an alarm.\nAnswer: p99 latency.\n\n"
+              f"Thanks,\n{name}"),
     )
 
 
@@ -111,29 +114,33 @@ def _pdf(name: str) -> str:
 
 def test_parse():
     print("\n[1] mailto parsing")
-    m = email_apply.parse_mailto(DAWER_HREF)
-    check("DawerOne recipient", m and m.to == "careers@dawerone.com", str(m))
+    m = email_apply.parse_mailto(LAMNA_HREF)
+    check("Lamna recipient", m and m.to == "careers@lamna.example", str(m))
     check("subject decoded", m and m.subject == "Application: Backend and Infrastructure Engineer – [Your name]")
-    check("body template decoded", m and m.body.startswith("Hi DawerOne team,\n\nI would like") and "Answer:" in m.body)
-    m = email_apply.parse_mailto(NATTON_STUCK)
-    check("mailto inside agent prose", m and m.to == "careers@natton.ai" and not m.subject, str(m))
+    check("body template decoded", m and m.body.startswith("Hi Lamna team,\n\nI would like") and "Answer:" in m.body)
+    check("unencoded ( ) inside the href kept, whole template read", m and m.body.endswith("2. Name an alarm.\nAnswer:"),
+          repr(m.body[-60:]) if m else "")
+    m = email_apply.parse_mailto("(apply at mailto:jobs@example.org).")
+    check("closing paren of the prose dropped", m and m.to == "jobs@example.org" and not m.subject, str(m))
+    m = email_apply.parse_mailto(PROSEWARE_STUCK)
+    check("mailto inside agent prose", m and m.to == "careers@proseware.example" and not m.subject, str(m))
     m = email_apply.parse_mailto("Send your CV to jobs@example.org today.")
     check("bare address fallback", m and m.to == "jobs@example.org", str(m))
-    check("no address -> None", email_apply.parse_mailto(DAWER_STUCK) is None)
+    check("no address -> None", email_apply.parse_mailto(LAMNA_STUCK) is None)
 
 
 def test_verdict():
     print("\n[2] agent verdict")
     o = agent_driver.parse_verdict(
         "STATUS: email_apply\nDETAIL: posting has no web form, only an email application to "
-        f"careers@dawerone.com\nEMAIL_APPLY: {DAWER_HREF}\nFIELDS_FILLED_JSON: {{}}\n")
+        f"careers@lamna.example\nEMAIL_APPLY: {LAMNA_HREF}\nFIELDS_FILLED_JSON: {{}}\n")
     check("email_apply is a valid status", o.status == "email_apply", o.status)
-    check("full href kept for the subject/body", o.email_mailto == DAWER_HREF)
-    o = agent_driver.parse_verdict(f"STATUS: stuck\nDETAIL: {NATTON_STUCK}\nFIELDS_FILLED_JSON: {{}}\n")
-    check("old-prompt 'stuck' with an address -> email_apply (Natton 1684)",
-          o.status == "email_apply" and email_apply.parse_mailto(o.email_mailto).to == "careers@natton.ai", o.status)
-    o = agent_driver.parse_verdict(f"STATUS: stuck\nDETAIL: {DAWER_STUCK}\nFIELDS_FILLED_JSON: {{}}\n")
-    check("no-form 'stuck' without an address stays stuck (DawerOne 1844 text)", o.status == "stuck", o.status)
+    check("full href kept for the subject/body", o.email_mailto == LAMNA_HREF)
+    o = agent_driver.parse_verdict(f"STATUS: stuck\nDETAIL: {PROSEWARE_STUCK}\nFIELDS_FILLED_JSON: {{}}\n")
+    check("old-prompt 'stuck' with an address -> email_apply (Proseware 1684)",
+          o.status == "email_apply" and email_apply.parse_mailto(o.email_mailto).to == "careers@proseware.example", o.status)
+    o = agent_driver.parse_verdict(f"STATUS: stuck\nDETAIL: {LAMNA_STUCK}\nFIELDS_FILLED_JSON: {{}}\n")
+    check("no-form 'stuck' without an address stays stuck (Lamna 1844 text)", o.status == "stuck", o.status)
     o = agent_driver.parse_verdict("STATUS: email_apply\nDETAIL: apply by email\nFIELDS_FILLED_JSON: {}\n")
     check("email_apply with no address -> stuck", o.status == "stuck" and "without a mailto" in o.detail, o.detail)
     o = agent_driver.parse_verdict("STATUS: stuck\nDETAIL: verification email never arrived from x@y.com\n")
@@ -145,11 +152,11 @@ def test_verdict():
 
 def test_compose_and_send():
     print("\n[3] compose, attach, draft, send")
-    job = SimpleNamespace(id=1844, company_name="DawerOne", job_title="Backend and Infrastructure Engineer",
+    job = SimpleNamespace(id=1844, company_name="Lamna", job_title="Backend and Infrastructure Engineer",
                           location="Gurgaon", job_url="https://www.linkedin.com/jobs/view/1/", metadata_json="{}",
                           module3_fit_reasoning="fits", module3_resume_pdf_path=_pdf("resume.pdf"),
                           module3_cover_pdf_path=_pdf("cover.pdf"))
-    mailto = email_apply.parse_mailto(DAWER_HREF)
+    mailto = email_apply.parse_mailto(LAMNA_HREF)
     seen = {}
 
     def gen(**k):
@@ -163,11 +170,11 @@ def test_compose_and_send():
     check("prompt carries the candidate facts", personal.candidate_facts()[:40] in seen["system_instruction"])
     check("draft mode: a draft, nothing sent", len(svc.drafts_made) == 1 and not svc.sent and not res.sent)
     check("draft status names the draft and recipient",
-          res.status.startswith("email_draft:draft_id=r-draft1 to=careers@dawerone.com |"), res.status)
-    check("parked_draft reads it back", email_apply.parked_draft(res.status) == ("r-draft1", "careers@dawerone.com"))
+          res.status.startswith("email_draft:draft_id=r-draft1 to=careers@lamna.example |"), res.status)
+    check("parked_draft reads it back", email_apply.parked_draft(res.status) == ("r-draft1", "careers@lamna.example"))
     msg = message_from_bytes(svc.drafts_made[0], policy=email_policy.default)
     names = [p.get_filename() for p in msg.iter_attachments()]
-    check("To / From / Subject", msg["To"] == "careers@dawerone.com" and personal.email() in msg["From"]
+    check("To / From / Subject", msg["To"] == "careers@lamna.example" and personal.email() in msg["From"]
           and msg["Subject"].endswith(personal.full_name()), f"{msg['To']} {msg['From']} {msg['Subject']}")
     check("resume + cover attached under the job's upload names",
           len(names) == 2 and "_Resume_1844_" in names[0] and "_Cover_Letter_1844_" in names[1], str(names))
@@ -175,7 +182,7 @@ def test_compose_and_send():
 
     res = email_apply.apply_by_email(job, mailto, how="send", generate=gen, svc=svc)
     check("send mode: sent, status has the gmail id",
-          res.sent and len(svc.sent) == 1 and res.status == "submitted:email gmail_id=msg1 to=careers@dawerone.com",
+          res.sent and len(svc.sent) == 1 and res.status == "submitted:email gmail_id=msg1 to=careers@lamna.example",
           res.status)
 
     def raises(fn):
@@ -191,6 +198,22 @@ def test_compose_and_send():
     bad = email_apply.EmailDraft(subject="Application", body=f"1. Q?\nAnswer:\n\n{personal.full_name()}")
     check("blank Answer: line refused", "placeholder" in raises(
         lambda: email_apply.apply_by_email(job, mailto, how="send", generate=lambda **k: bad, svc=svc)))
+    check("template items read from the posting",
+          email_apply.template_items(mailto.body)
+          == ["Name:", "1. Describe a production backend.", "Earliest start date (DD/MM/YYYY):", "2. Name an alarm."],
+          str(email_apply.template_items(mailto.body)))
+    calls = []
+    skipped = email_apply.EmailDraft(subject="Application", body=f"Hi, resume attached.\n{personal.full_name()}")
+
+    def skip_then_fill(**k):
+        calls.append(k["user_text"])
+        return skipped if len(calls) == 1 else _good_body()
+
+    res = email_apply.apply_by_email(job, mailto, how="draft", generate=skip_then_fill, svc=svc)
+    check("dropped template questions: retried with the reason, then filled",
+          len(calls) == 2 and "rejected" in calls[1] and "1. Describe" in calls[1] and "Answer: a Go" in res.body)
+    check("questions never answered: refused after the retries", "template items are missing" in raises(
+        lambda: email_apply.apply_by_email(job, mailto, how="send", generate=lambda **k: skipped, svc=svc)))
     check("other mailbox's token refused", "not the candidate" in raises(
         lambda: email_apply.apply_by_email(job, mailto, how="send", generate=gen, svc=FakeGmail("x@other.com"))))
     nores = SimpleNamespace(**{**vars(job), "module3_resume_pdf_path": "/nonexistent.pdf"})
@@ -206,7 +229,7 @@ def _session():
 
 
 def _job(s, jid, *, attempts=0, last=None):
-    j = JobModel(id=jid, company_name="Natton AI", job_title="Agent Platform Engineer",
+    j = JobModel(id=jid, company_name="Proseware AI", job_title="Agent Platform Engineer",
                  job_url=f"https://www.linkedin.com/jobs/view/{jid}/", should_apply=True, applied=False,
                  module2_enriched_at=datetime.datetime.now(), module3_resume_pdf_path=_pdf("resume.pdf"),
                  module4_attempts=attempts, module4_last_status=last)
@@ -246,7 +269,7 @@ def test_runner():
     print("\n[4] runner")
     outcome = agent_driver.parse_verdict(
         "STATUS: email_apply\nDETAIL: only an email application\n"
-        "EMAIL_APPLY: mailto:careers@natton.ai\nFIELDS_FILLED_JSON: {}\n")
+        "EMAIL_APPLY: mailto:careers@proseware.example\nFIELDS_FILLED_JSON: {}\n")
 
     s, svc = _session(), FakeGmail(personal.email())
     j = _job(s, 1684)
@@ -254,7 +277,7 @@ def test_runner():
     s.refresh(j)
     check("send: counted as submitted and emailed", res.submitted == 1 and res.emailed == 1 and res.failed == 0)
     check("send: applied, status keeps the gmail id",
-          j.applied and j.module4_last_status == "submitted:email gmail_id=msg1 to=careers@natton.ai"
+          j.applied and j.module4_last_status == "submitted:email gmail_id=msg1 to=careers@proseware.example"
           and j.module4_outcome == "submitted", j.module4_last_status)
     check("send: no attempt charged", (j.module4_attempts or 0) == 0)
 
@@ -275,7 +298,7 @@ def test_runner():
     check("send mode: the parked draft is sent as is, no agent",
           spawned == [] and svc.drafts_sent == ["r-draft1"] and not svc.sent and res.emailed == 1, str(spawned))
     check("send mode: applied with the sent draft's message id",
-          j.applied and j.module4_last_status == "submitted:email gmail_id=msg-of-r-draft1 to=careers@natton.ai",
+          j.applied and j.module4_last_status == "submitted:email gmail_id=msg-of-r-draft1 to=careers@proseware.example",
           j.module4_last_status)
 
     s, svc = _session(), FakeGmail("someone@else.com")
@@ -286,7 +309,7 @@ def test_runner():
           res.failed == 1 and not j.applied and j.module4_attempts == 1 and not svc.sent, j.module4_last_status)
 
     print("\n[5] requeued no-web-form jobs are retried, not dropped")
-    last = f"stuck:{NATTON_STUCK}"
+    last = f"stuck:{PROSEWARE_STUCK}"
     with patch.dict(os.environ, {"JOBO_EMAIL_APPLY": "send"}):
         check("email apply on: not a permanent blocker", blockers.permanent_reason_from_last_status(last) is None)
     with patch.dict(os.environ, {"JOBO_EMAIL_APPLY": "off"}):

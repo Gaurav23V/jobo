@@ -1,12 +1,12 @@
 """Apply by email when a posting has no web form, only a mailto link (GHO-67).
 
-Natton AI 1684 and DawerOne 1844 (Oct 2026) say "send your CV to
+Proseware AI 1684 and Lamna 1844 (Oct 2026) say "send your CV to
 careers@..." and nothing else. The browser agent cannot send mail, so both
 ended as `stuck` and were dropped. Now the agent reports `STATUS: email_apply`
 with the posting's mailto link, and this module does the rest in code:
 
   1. parse the link: recipient, the subject the posting asks for, and any
-     body template it pre-fills (DawerOne's has four questions to answer);
+     body template it pre-fills (Lamna's has four questions to answer);
   2. write a short plain-text body from personal/candidate_facts.md, the
      profile and the job (one `claude -p` call, module3/claude_client.py);
   3. attach the job's tailored resume, and its cover letter if there is one;
@@ -49,7 +49,9 @@ STATUS = "email_apply"
 DRAFT_PREFIX = "email_draft:"
 
 _ADDR = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
-_MAILTO_RE = re.compile(r"mailto:[^\s\"'<>`)\]]+", re.I)
+# ")" is legal unencoded in an href ("Earliest start date (DD/MM/YYYY)" in
+# Lamna 1844's body template); only an unbalanced trailing one is prose.
+_MAILTO_RE = re.compile(r"mailto:[^\s\"'<>`\]]+", re.I)
 _ADDR_RE = re.compile(_ADDR)
 # How an agent describes a posting whose only apply path is an email
 # (module4/blockers.py, module4/run_report.py: signature no_web_form).
@@ -61,6 +63,12 @@ _DRAFT_ID_RE = re.compile(r"draft_id=(\S+)")
 # "Answer:" line: the body is not finished and must not go out.
 _PLACEHOLDER_RE = re.compile(r"\[[^\]\n]{1,40}\]|<[A-Za-z ]{2,30}>|^\s*Answer:\s*$", re.M)
 MAX_BODY_CHARS = 6000
+COMPOSE_ATTEMPTS = 3
+# A body template's numbered questions ("1. Describe ...") and its fields
+# ("Name:", "Expected CTC (INR per annum) ...:"): each must come back filled.
+# Lamna 1844's first draft dropped all four questions.
+_TEMPLATE_QUESTION = re.compile(r"^\d+[.)]\s+\S")
+_TEMPLATE_FIELD = re.compile(r"^[A-Z][^:\[\]]{1,80}:")
 
 
 def mode() -> str:
@@ -85,6 +93,8 @@ def parse_mailto(text: str | None) -> Mailto | None:
     m = _MAILTO_RE.search(text)
     if m:
         href = m.group(0).rstrip(".,;")
+        while href.endswith(")") and href.count(")") > href.count("("):
+            href = href[:-1].rstrip(".,;")
         parts = urllib.parse.urlsplit(href)
         to = urllib.parse.unquote(parts.path).split(",")[0].strip()
         q = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
@@ -113,10 +123,13 @@ Rules:
   employer, project, skill, number or credential. If the posting asks
   something the facts do not cover, answer honestly with the closest real
   experience, or say plainly that the candidate has not done it.
-- If the posting supplies a body template, keep its structure and fill
-  every field and answer every question; drop its instructions to the
+- If the posting supplies a body template, the email IS that template,
+  filled in: keep every line in order - each field label and each numbered
+  question verbatim - and put the value after each label and the answer
+  under each question. Drop only its bracketed instructions to the
   applicant (e.g. "[Please attach ...]"). Leave no placeholder or blank
-  "Answer:" line. Keep each answer to 2-4 sentences.
+  "Answer:" line. Keep each answer to 2-4 sentences. A field the facts
+  cover (expected CTC, notice period, location) gets the fact.
 - Without a template: 90-160 words. Who the candidate is, why this role,
   one or two concrete matching things they built, and that the resume is
   attached. No flattery, no buzzwords, no bullet lists.
@@ -153,20 +166,35 @@ def compose(job, mailto: Mailto, note: str = "", *, generate=None) -> EmailDraft
         from module3 import claude_client
 
         generate = claude_client.generate_structured
-    draft = generate(
-        system_instruction=_system_prompt(),
-        user_text=_job_text(job, mailto, note),
-        response_model=EmailDraft,
-    )
-    draft.subject = " ".join(draft.subject.split())
-    draft.body = draft.body.strip()
-    problem = check_draft(draft)
-    if problem:
-        raise ValueError(f"email body not sendable: {problem}")
-    return draft
+    user_text = _job_text(job, mailto, note)
+    problem = ""
+    for _ in range(COMPOSE_ATTEMPTS):
+        draft = generate(
+            system_instruction=_system_prompt(),
+            user_text=user_text + (f"\nYour previous draft was rejected: {problem}. Fix that.\n" if problem else ""),
+            response_model=EmailDraft,
+        )
+        draft.subject = " ".join(draft.subject.split())
+        draft.body = draft.body.strip()
+        problem = check_draft(draft, mailto.body)
+        if not problem:
+            return draft
+    raise ValueError(f"email body not sendable: {problem}")
 
 
-def check_draft(draft: EmailDraft) -> str:
+def template_items(template: str) -> list[str]:
+    """The fields ("Name:") and numbered questions a body template asks for."""
+    items = []
+    for line in (template or "").splitlines():
+        line = line.strip()
+        if _TEMPLATE_QUESTION.match(line):
+            items.append(line[:50])
+        elif _TEMPLATE_FIELD.match(line) and not line.lower().startswith("answer"):
+            items.append(line.split(":", 1)[0] + ":")
+    return items
+
+
+def check_draft(draft: EmailDraft, template: str = "") -> str:
     if not draft.subject or not draft.body:
         return "empty subject or body"
     if len(draft.body) > MAX_BODY_CHARS:
@@ -177,6 +205,10 @@ def check_draft(draft: EmailDraft) -> str:
             return f"unfilled placeholder {m.group(0).strip()!r}"
     if personal.full_name() and personal.full_name() not in draft.body:
         return "body is not signed with the candidate's name"
+    squashed = " ".join(draft.body.split())
+    missing = [i for i in template_items(template) if " ".join(i.split()) not in squashed]
+    if missing:
+        return f"the posting's template items are missing (keep each one verbatim and fill it): {missing}"
     return ""
 
 

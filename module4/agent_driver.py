@@ -498,7 +498,7 @@ def parse_verdict(text: str) -> ApplyOutcome:
     email_mailto = matches[-1].group(1) if matches else ""
     if status == "stuck" and email_apply.no_web_form(detail):
         # Agents trained on the old prompt still call a mailto-only posting
-        # stuck (Natton 1684, DawerOne 1844); the address is in the detail.
+        # stuck (Proseware 1684, Lamna 1844); the address is in the detail.
         email_mailto = email_mailto or detail
         status = STATUS_EMAIL_APPLY if email_apply.parse_mailto(email_mailto) else status
     if status == STATUS_EMAIL_APPLY and not email_apply.parse_mailto(email_mailto or detail):
