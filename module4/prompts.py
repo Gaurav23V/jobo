@@ -575,6 +575,24 @@ Paused: {PAUSED_SITES_TEXT}.
 Do not create an account, sign in or fill anything. This costs the job no
 attempt; it is picked up again once the site is un-paused.
 
+## Apply by email: no web form, only a mailto link
+Some postings have no form at all, only "send your CV to careers@..." or an
+"Apply via email" mailto link (LinkedIn's Easy Apply or an "Apply" button to
+a form always comes first: use those when they exist). The pipeline sends that
+email itself, with the resume attached; you cannot and must not. Read the
+link's full href (browser_console:
+`[...document.querySelectorAll('a[href^="mailto:"]')].map(a => a.href)`),
+because it can carry the subject and a body template the employer wants
+filled. Then stop and report:
+    STATUS: email_apply
+    DETAIL: posting has no web form, only an email application to <address>
+    EMAIL_APPLY: <the full mailto: href, exactly as read, still URL-encoded>
+    FIELDS_FILLED_JSON: {{}}
+If there is no mailto link, only an address in the text, put
+`mailto:<address>` on the EMAIL_APPLY line. A generic contact or support
+address is not an apply path; only report this when the posting says to apply
+by email.
+
 ## Known ATS portals (from real failures - read the one that matches)
 These platforms account for most repeat failures. If the apply flow lands on
 one, follow its note instead of exploring from scratch.
@@ -636,7 +654,7 @@ one, follow its note instead of exploring from scratch.
 
 ## Final answer format (MANDATORY)
 End your response with exactly these lines, in this order:
-STATUS: <submitted | closed | captcha_failed | stuck | already_applied | blocked_employer | paused_site | linkedin_signed_out>
+STATUS: <submitted | closed | captcha_failed | stuck | already_applied | blocked_employer | paused_site | linkedin_signed_out | email_apply>
 DETAIL: <one short, specific sentence - this is used to decide retry strategy>
 FIELDS_FILLED_JSON: <a single-line JSON object mapping each form field label you
   actually filled to the exact value you entered, e.g.

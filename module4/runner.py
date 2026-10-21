@@ -33,6 +33,7 @@ from module4 import (
     captcha_walls,
     circuit_breaker,
     constants,
+    email_apply,
     google_forms,
     linkedin_router,
     linkedin_session,
@@ -292,6 +293,11 @@ class Module4Result:
     # hCaptcha on an Oracle Cloud / iCIMS sign-in gate (module4/captcha_walls.py):
     # kept in the queue, no attempt charged, skipped by later runs.
     captcha_parked: int = 0
+    # Mailto-only postings (module4/email_apply.py): applications sent by
+    # email (also counted in `submitted`), and drafts parked for the
+    # candidate to read first (no attempt charged).
+    emailed: int = 0
+    email_drafted: int = 0
     # The apply browser lost its LinkedIn session; the stage stopped so the
     # rest of the queue keeps its attempts (module4/linkedin_session.py).
     linkedin_signed_out: bool = False
@@ -566,6 +572,48 @@ def _pause_for_session_reset(resets_at, cause, deadline, result, worker, left) -
     return True
 
 
+def _apply_by_email(session, job, outcome, result: "Module4Result", pace_url: str) -> None:
+    """Send (or draft) the application email a mailto-only posting asks for."""
+    jid = job.id
+    mailto = email_apply.parse_mailto(outcome.email_mailto or outcome.detail)
+    try:
+        sent = email_apply.apply_by_email(job, mailto, outcome.detail)
+    except Exception as e:  # noqa: BLE001 - any failure is an ordinary failed attempt
+        logger.warning("[%s] Email application failed: %s", jid, e)
+        failed = agent_driver.ApplyOutcome("stuck", f"email application to {mailto.to} failed: {e}")
+        persist.record_failed_attempt(session, job, failed)
+        result.failed += 1
+        result.details.append(f"job_id={jid}: EMAIL FAILED ({e})")
+        return
+    if sent.sent:
+        persist.mark_applied(session, job, status=sent.status)
+        result.submitted += 1
+        result.emailed += 1
+        result.details.append(f"job_id={jid}: SUBMITTED by email to {sent.to} ({sent.message_id})")
+        _note_submission(pace_url)
+    else:
+        persist.mark_status(session, job, sent.status)
+        result.email_drafted += 1
+        result.details.append(f"job_id={jid}: EMAIL DRAFTED to {sent.to} ({sent.draft_id})")
+
+
+def _send_parked_draft(session, job, parked: tuple[str, str], result: "Module4Result") -> None:
+    jid = job.id
+    draft_id, to = parked
+    try:
+        mid = email_apply.send_draft(draft_id)
+    except Exception as e:  # noqa: BLE001 - leave it parked; the next run tries again
+        logger.warning("[%s] Sending parked email draft %s failed: %s", jid, draft_id, e)
+        result.failed += 1
+        result.details.append(f"job_id={jid}: EMAIL DRAFT SEND FAILED ({e})")
+        return
+    persist.mark_applied(session, job, status=email_apply.sent_status(mid, to))
+    result.submitted += 1
+    result.emailed += 1
+    result.details.append(f"job_id={jid}: SUBMITTED by email to {to} ({mid})")
+    logger.info("[%s] SUBMITTED: parked email draft %s sent (gmail id %s).", jid, draft_id, mid)
+
+
 def run_module4(
     session: Session,
     *,
@@ -759,6 +807,17 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             result.blocked += 1
             result.details.append(f"job_id={jid}: BLOCKED EMPLOYER ({blocked_reason})")
             logger.warning("[%s] Refusing, blocked employer: %s", jid, blocked_reason)
+            continue
+
+        # A Gmail draft parked by draft mode (module4/email_apply.py): sent as
+        # it stands once the mode is "send", with no agent; else left waiting.
+        parked = email_apply.parked_draft(job.module4_last_status)
+        if parked:
+            if email_apply.mode() != "send" or dry_run:
+                result.email_drafted += 1
+                result.details.append(f"job_id={jid}: EMAIL DRAFT waiting ({parked[0]})")
+                continue
+            _send_parked_draft(session, job, parked, result)
             continue
 
         # Circuit breaker: skip jobs on domains with repeated hard failures
@@ -1298,6 +1357,8 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             result.captcha_parked += 1
             result.details.append(f"job_id={jid}: PARKED, hCaptcha sign-in wall on {wall}")
             logger.info("[%s] Parked (no attempt charged): hCaptcha sign-in wall on %s.", jid, wall)
+        elif outcome.status == "email_apply" and email_apply.mode() != "off" and not dry_run:
+            _apply_by_email(session, job, outcome, result, pace_url)
         elif _google_form_wall(outcome, cdp):
             # Not the job's fault and not hopeless: park it, charge nothing.
             form_url = google_forms.find_form_url(outcome.detail) or next(

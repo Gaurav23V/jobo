@@ -25,7 +25,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from module4 import captcha_walls
+from module4 import captcha_walls, email_apply
 from policy import personal
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,13 @@ VALID_STATUSES = {
     # problem: the runner stops the stage and charges no attempt
     # (module4/linkedin_session.py). The agent never signs in itself.
     "linkedin_signed_out",
+    # The posting has no web form, only "email your CV to ..." (a mailto
+    # link). The driver writes and sends that email (module4/email_apply.py);
+    # the agent only reports the link on an EMAIL_APPLY: line.
+    "email_apply",
 }
+STATUS_EMAIL_APPLY = email_apply.STATUS
+EMAIL_APPLY_RE = re.compile(r"^EMAIL_APPLY:\s*(\S.*?)\s*$", re.MULTILINE)
 
 # --- Emailed-verification-code handoff -------------------------------------
 # 7 of 19 apply failures on the 2026-09-01 run were ATS portals that gate the
@@ -240,6 +246,8 @@ class ApplyOutcome:
     # worker's browser. With no successful upload either, that is the mark of
     # an agent driving some other browser (GHO-17), which the runner counts.
     upload_no_file_input: int = 0
+    # email_apply: the posting's mailto link as the agent read it.
+    email_mailto: str = ""
 
     def __post_init__(self):
         if self.fields_filled is None:
@@ -486,6 +494,16 @@ def parse_verdict(text: str) -> ApplyOutcome:
         # Parking is only for the Oracle Cloud / iCIMS gates; anywhere else it
         # is the captcha_failed it always was (and must not wall that host).
         status = "captcha_failed"
+    matches = list(EMAIL_APPLY_RE.finditer(text))
+    email_mailto = matches[-1].group(1) if matches else ""
+    if status == "stuck" and email_apply.no_web_form(detail):
+        # Agents trained on the old prompt still call a mailto-only posting
+        # stuck (Natton 1684, DawerOne 1844); the address is in the detail.
+        email_mailto = email_mailto or detail
+        status = STATUS_EMAIL_APPLY if email_apply.parse_mailto(email_mailto) else status
+    if status == STATUS_EMAIL_APPLY and not email_apply.parse_mailto(email_mailto or detail):
+        status = "stuck"
+        detail = f"email_apply without a mailto address: {detail}"
     if status not in VALID_STATUSES:
         status = "stuck"
         detail = detail or f"unparseable agent verdict: {text[-200:]}"
@@ -520,7 +538,8 @@ def parse_verdict(text: str) -> ApplyOutcome:
         except json.JSONDecodeError:
             logger.warning("FIELDS_FILLED_JSON present but not valid JSON, dropping.")
 
-    return ApplyOutcome(status=status, detail=detail, fields_filled=fields_filled)
+    return ApplyOutcome(status=status, detail=detail, fields_filled=fields_filled,
+                        email_mailto=email_mailto)
 
 
 def _dump_debug_transcript(job_id: int, raw_output: str) -> None:

@@ -221,7 +221,7 @@ def permanent_reason(status: str | None, detail: str | None) -> str | None:
         return "ATS account wall: account cannot be created or signed in to"
     if _UNDELIVERABLE_CODE.search(d):
         return "verification code is never delivered"
-    if _NO_WEB_FORM.search(d):
+    if _NO_WEB_FORM.search(d) and not _email_apply_on():
         return "no web application form"
     if _BOT_WALL.search(d):
         return "site blocks automated browsers"
@@ -238,6 +238,14 @@ def dead_listing_reason(status: str | None, detail: str | None, url: str | None 
     if _SERVER_ERROR.search(d) and _PERSISTED.search(d):
         return "ZipRecruiter apply link answers a server error on every load"
     return None
+
+
+def _email_apply_on() -> bool:
+    # A mailto-only posting is applied to by email now (module4/email_apply.py);
+    # the retry lets the agent report it as `email_apply`.
+    from module4 import email_apply
+
+    return email_apply.mode() != "off"
 
 
 def permanent_reason_from_last_status(last_status: str | None) -> str | None:

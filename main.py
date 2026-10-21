@@ -404,6 +404,11 @@ def apply(
                 f"  hCaptcha walls:     {result.captcha_parked} "
                 "(module4/captcha_walls.py; parked, no attempt charged)"
             )
+        if result.emailed or result.email_drafted:
+            click.echo(
+                f"  By email:           {result.emailed} sent, {result.email_drafted} "
+                "drafted (module4/email_apply.py; mailto-only postings)"
+            )
         if result.circuit_broken:
             click.echo(f"  Circuit-broken:     {result.circuit_broken}")
         if form_workers:
@@ -643,6 +648,52 @@ def budget_gate(stage: str, override: bool):
     click.echo(json.dumps(budget_guard.gate_record(check, stage)))
     stop = check.should_stop or check.session_limited
     sys.exit(budget_guard.GATE_STOP_EXIT if stop else 0)
+
+
+@cli.command("email-apply")
+@click.argument("job_id", type=int)
+@click.option("--mailto", default="", help="The posting's mailto: href (default: the one in the job's last status)")
+@click.option("--draft", "how", flag_value="draft", default=True, help="Create a Gmail draft only (default)")
+@click.option("--send", "how", flag_value="send", help="Write and send the email now")
+@click.option("--send-draft", "how", flag_value="send-draft", help="Send the job's parked email draft as it stands")
+def email_apply_cmd(job_id: int, mailto: str, how: str):
+    """Apply to one mailto-only posting by email from the candidate's Gmail.
+
+    Counts a sent email as submitted (module4_last_status keeps the Gmail
+    message id); a draft parks the job as email_draft: with the draft id.
+    """
+    from db.models import JobModel
+    from module4 import email_apply, persist
+
+    logging.basicConfig(level=logging.INFO)
+    session = get_session()
+    try:
+        job = session.get(JobModel, job_id)
+        if job is None:
+            raise click.ClickException(f"no job {job_id}")
+        if job.applied:
+            raise click.ClickException(f"job {job_id} is already applied: {job.module4_last_status}")
+        if how == "send-draft":
+            parked = email_apply.parked_draft(job.module4_last_status)
+            if not parked:
+                raise click.ClickException(f"job {job_id} has no parked email draft")
+            mid = email_apply.send_draft(parked[0])
+            persist.mark_applied(session, job, status=email_apply.sent_status(mid, parked[1]))
+            click.echo(f"job {job_id}: sent draft {parked[0]} to {parked[1]} (gmail id {mid})")
+            return
+        target = email_apply.parse_mailto(mailto or job.module4_last_status)
+        if not target:
+            raise click.ClickException(f"no mailto address for job {job_id}; pass --mailto")
+        res = email_apply.apply_by_email(job, target, job.module4_last_status or "", how=how)
+        if res.sent:
+            persist.mark_applied(session, job, status=res.status)
+        else:
+            persist.mark_status(session, job, res.status)
+        click.echo(f"To: {res.to}\nSubject: {res.subject}\nAttachments: {', '.join(res.files)}\n")
+        click.echo(res.body)
+        click.echo(f"\nstatus: {res.status}")
+    finally:
+        session.close()
 
 
 @cli.command("doctor")

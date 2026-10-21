@@ -16,14 +16,17 @@ def _stamp_outcome(job: JobModel) -> None:
     )
 
 
-def mark_applied(session: Session, job: JobModel, *, dry_run: bool = False) -> None:
+def mark_applied(
+    session: Session, job: JobModel, *, dry_run: bool = False, status: str = "submitted"
+) -> None:
     """A real application was sent for this job.
 
     ONLY call this for a genuine submission. A dead listing is terminal too,
-    but it sent nothing - use mark_closed() for that.
+    but it sent nothing - use mark_closed() for that. `status` may carry a
+    receipt after "submitted:" (an emailed application's Gmail message id).
     """
     job.applied = True
-    job.module4_last_status = "submitted"
+    job.module4_last_status = status
     job.module4_submitted_at = datetime.now()
     _stamp_outcome(job)
     if not dry_run:
