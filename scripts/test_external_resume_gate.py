@@ -23,6 +23,12 @@ records uploads and submissions, in a headless Chromium on a random port
 Hermes plugin's pre_tool_call hook is called the way Hermes calls it.
 
 On origin/main: both uploads fail, and every bad-path submit goes through.
+
+GHO-78 (Verizon 2219, 2026-10-22): attempt 2 resumed a Workday draft that kept
+attempt 1's upload of this job's file and sent the Review page with a direct
+browser_click on "Submit". The veto saw our file and allowed it, but the run
+still logged RESUME RULE VIOLATION because only NEED_CLICK recorded the
+proof. Replica: the Review step from that session's snapshot.
 """
 from __future__ import annotations
 
@@ -148,6 +154,21 @@ document.getElementById('quickProfileImport').addEventListener('change', async (
 });
 </script>"""
 
+# Workday's Review step on a resumed draft (Verizon 2219, 2026-10-22 20:11):
+# the "Resume/CV" group lists the draft's file as text, no upload control.
+# ?file=<name> picks the file the draft holds; none = no file at all.
+WORKDAY_REVIEW = r"""<!doctype html><title>Workday</title>
+<main><h2>Junior Data Security Engineer</h2><h3>Review</h3>
+<div role="group" aria-label="Resume/CV" id="cv"><h4>Resume/CV</h4></div>
+<button type="button">Back</button><button type="button" id="submit">Submit</button></main>
+<script>
+const f = new URLSearchParams(location.search).get('file');
+if (f) document.getElementById('cv').insertAdjacentHTML('beforeend',
+  '<div role="alert">' + f + ' successfully uploaded</div><span>' + f + '</span><span>102.21 KB</span>');
+document.getElementById('submit').onclick = () =>
+  fetch('/api/submit', {method: 'POST', body: JSON.stringify({resume: f})});
+</script>"""
+
 # A form that genuinely has no resume field.
 PLAIN = r"""<!doctype html><title>Acme quick form</title>
 <form onsubmit="return false"><h1>Apply</h1><label>Full name <input id="name"></label>
@@ -175,7 +196,8 @@ class Server:
 
             def do_GET(self):
                 path = self.path.split("?", 1)[0]
-                page = {"/turbohire": TURBOHIRE, "/oracle": ORACLE, "/plain": PLAIN}.get(path)
+                page = {"/turbohire": TURBOHIRE, "/oracle": ORACLE, "/plain": PLAIN,
+                        "/workday": WORKDAY_REVIEW}.get(path)
                 self._send(200, page) if page else self._send(404, "nope")
 
             def do_POST(self):
@@ -275,6 +297,10 @@ def test_rule():
         ("resume field, nothing uploaded: refuse", [slot], {}, False),
         ("no resume field, nothing attempted: allow", [{"external": True, "slots": []}], {}, True),
         ("no page read at all, nothing attempted: allow", [], {}, True),
+        ("page shows another job's file, not ours: refuse",
+         [{"external": True, "other_ours": [f"alex_example_resume_1464_def456.pdf"]}], {}, False),
+        ("page shows ours next to another job's: allow",
+         [{"external": True, "shown_ours": True, "other_ours": ["alex_example_resume_1464_def456.pdf"]}], {}, True),
     ]
     for label, states, gs, want in rows:
         ok, reason = g.judge_external(states, ours, gs)
@@ -282,6 +308,18 @@ def test_rule():
     msg = g.refusal_message_external("r", ours)
     check("refusal names NEED_UPLOAD: resume and STATUS: stuck, never another way to send",
           "NEED_UPLOAD: resume" in msg and "STATUS: stuck" in msg and "Submit refused" in msg, msg)
+
+
+def test_audit_redaction():
+    from module4 import password_reset, submission_audit
+
+    secret = password_reset.STANDARD_PASSWORD or "Example@123"
+    out = submission_audit._redact_passwords({
+        "Email (sign in)": "a@example.com", "Password": secret, "Verify New Password": "x",
+        "Account": f"created with {secret}", "Resume": "Alex_Example_Resume_1_abc123.pdf"})
+    check("audit: the account password is redacted, other fields kept",
+          out["Password"] == out["Verify New Password"] == "[redacted]" and secret not in out["Account"]
+          and out["Email (sign in)"] == "a@example.com" and out["Resume"].endswith(".pdf"), str(out))
 
 
 def test_stored_evidence():
@@ -407,6 +445,57 @@ def test_plugin_veto(cdp, srv, page, base, named, tmp: Path):
                 os.environ[k] = v
 
 
+def test_resumed_workday_draft(cdp, srv, page, base, resume, named):
+    """GHO-78: a direct browser_click on Submit, no NEED_CLICK, no new upload."""
+    plugin = _load("jobo_browser_plugin_ext_wd", PLUGIN_DIR / "__init__.py")
+    other = named.name.replace(f"_Resume_{JOB_ID}_", "_Resume_1464_")
+    st: dict = {}
+
+    def click_submit(prompt):
+        env = {**agent_driver._JOB.env(), "BROWSER_CDP_URL": cdp}
+        old = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        try:
+            plugin.account_guard.remember_refs('- button "Back" [ref=e44]\n- button "Submit" [ref=e45]')
+            blocked = plugin._pre_tool_call("browser_click", {"ref": "e45"})
+        finally:
+            for k, v in old.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        st["blocked"] = blocked
+        if blocked:
+            return "STATUS: stuck\nDETAIL: the draft holds another resume\nFIELDS_FILLED_JSON: {}\n"
+        page.eval("document.getElementById('submit').click()")
+        time.sleep(0.3)
+        return VERDICT
+
+    srv.reset()
+    page.goto(f"{base}/workday?file={named.name}")
+    out, _ = drive(cdp, resume, [click_submit])
+    check("resumed Workday draft with this job's file: the direct Submit click goes through",
+          st.get("blocked") is None and [x.get("resume") for x in srv.submits] == [named.name],
+          f"{st.get('blocked')} {srv.submits}")
+    check("...and the run records the page evidence instead of a RESUME RULE VIOLATION (2219)",
+          out.status == "submitted" and not out.resume_rule_violation and out.resume_seen_on_page,
+          f"{out.status} {out.resume_rule_violation!r} seen={out.resume_seen_on_page}")
+
+    # The next attempt starts clean: the last attempt's evidence must not
+    # cover a draft that now holds no resume at all.
+    srv.reset()
+    page.goto(f"{base}/workday")
+    out, _ = drive(cdp, resume, [click_submit])
+    check("draft with no file: still flagged, the earlier attempt's evidence was cleared",
+          len(srv.submits) == 1 and not out.resume_seen_on_page
+          and "no verified upload of this job's resume" in out.resume_rule_violation,
+          f"{srv.submits} {out.resume_rule_violation!r} seen={out.resume_seen_on_page}")
+
+    srv.reset()
+    page.goto(f"{base}/workday?file={other}")
+    out, _ = drive(cdp, resume, [click_submit])
+    check("draft holding another job's file: the Submit click is BLOCKED, nothing sent",
+          (st.get("blocked") or {}).get("action") == "block" and "another job" in st["blocked"].get("message", "")
+          and not srv.submits, f"{st.get('blocked')} {srv.submits}")
+
+
 def test_oracle(cdp, srv, page, base, resume, named):
     srv.reset()
     page.goto(base + "/oracle")
@@ -472,6 +561,7 @@ def main() -> int:
         named = Path(upload_names.prepare(JOB_ID, str(resume)))
 
         guarded("rule", test_rule)
+        guarded("audit redaction", test_audit_redaction)
         guarded("stored evidence", test_stored_evidence)
         guarded("prompt", test_prompt)
         guarded("plugin parsing", test_plugin_parsing)
@@ -497,6 +587,7 @@ def main() -> int:
             guarded("turbohire upload", lambda: test_turbohire_upload(srv, page, base, named))
             guarded("turbohire gate", lambda: test_turbohire_gate(cdp, srv, page, base, resume, named))
             guarded("plugin veto", lambda: test_plugin_veto(cdp, srv, page, base, named, tmp))
+            guarded("resumed workday draft", lambda: test_resumed_workday_draft(cdp, srv, page, base, resume, named))
             guarded("oracle", lambda: test_oracle(cdp, srv, page, base, resume, named))
             guarded("plain", lambda: test_plain(cdp, srv, page, base, resume))
         finally:

@@ -29,12 +29,39 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 AUDIT_DIR = Path(__file__).parent.parent / "data" / "logs" / "apply_audit"
+
+
+_PASSWORD_KEY = re.compile(r"pass\s*word|passcode|\bpwd\b", re.I)
+REDACTED = "[redacted]"
+
+
+def _redact_passwords(fields: dict) -> dict:
+    """The agent's report lists the account password it typed (Workday
+    2219, GHO-78). Keep the field, never the value."""
+    if not isinstance(fields, dict):
+        return fields
+    try:
+        from module4 import password_reset
+
+        secret = password_reset.STANDARD_PASSWORD or ""
+    except Exception:  # pragma: no cover - personal data missing
+        secret = ""
+    out = {}
+    for key, value in fields.items():
+        if _PASSWORD_KEY.search(str(key)) and value:
+            out[key] = REDACTED
+        elif secret and isinstance(value, str) and secret in value:
+            out[key] = value.replace(secret, REDACTED)
+        else:
+            out[key] = value
+    return out
 
 
 def _sha256_file(path: str) -> str | None:
@@ -78,7 +105,7 @@ def write_audit_record(
             "recorded_at": datetime.now().isoformat(),
             "status": status,
             "detail": detail,
-            "fields_filled_by_agent": fields_filled,
+            "fields_filled_by_agent": _redact_passwords(fields_filled),
             "resume_pdf_path": resume_path,
             "resume_pdf_hash": _sha256_file(resume_path),
             "cover_pdf_path": cover_path,

@@ -242,6 +242,9 @@ class ApplyOutcome:
     resume_uploads_ok: int = 0
     easy_apply_seen: bool = False
     easy_apply_resume_verified: bool = False
+    # A submit gate (NEED_CLICK or the plugin's veto) saw this job's own file
+    # on the form: e.g. a resumed Workday draft that kept an earlier upload.
+    resume_seen_on_page: bool = False
     resume_rule_violation: str = ""
     # NEED_UPLOAD answers that found no file input in any tab of this
     # worker's browser. With no successful upload either, that is the mark of
@@ -310,6 +313,28 @@ class _JobContext:
     def resume_upload_failure(self, detail: str) -> None:
         self.resume_upload_failed = (detail or "upload failed")[:200]
         self._write()
+
+    def clear_page_evidence(self) -> None:
+        """Drop an earlier attempt's veto record (the folder is per job)."""
+        from module4 import easy_apply
+
+        path = easy_apply.guard.seen_file(self.state_file)
+        if path:
+            Path(path).unlink(missing_ok=True)
+
+    def absorb_page_evidence(self) -> None:
+        """The plugin's veto let a direct submit click through because the page
+        showed this job's own file (GHO-78: a resumed Workday draft, no new
+        upload, no NEED_CLICK)."""
+        from module4 import easy_apply
+
+        if self.resume_seen_on_page or not self.state_file:
+            return
+        seen = easy_apply.guard.read_seen(self.state_file, self.upload_name)
+        if seen:
+            self.resume_seen_on_page = True
+            logger.info("[%s] Resume check passed: the page showed this job's own file %s at a direct %s",
+                        self.job_id, self.upload_name, seen.get("what") or "submit")
 
     def guard_state(self) -> dict:
         return {"job_id": self.job_id, "upload_name": self.upload_name,
@@ -1354,6 +1379,7 @@ def run_apply_agent(
     state_file = str(upload_names.copies_dir() / str(int(job_id)) / "resume_guard.json") if upload_name else ""
     _JOB = _JobContext(job_id, upload_name, state_file)
     _JOB._write()
+    _JOB.clear_page_evidence()
     try:
         outcome = _run_apply_agent(
             system_prompt=system_prompt, user_prompt=user_prompt, cdp_url=cdp_url,
@@ -1379,6 +1405,9 @@ def _check_resume_rule(outcome: ApplyOutcome, job_id: int) -> ApplyOutcome:
     outcome.upload_no_file_input = _JOB.upload_no_file_input
     if outcome.status != "submitted" or not _JOB.upload_name:
         return outcome
+    if _JOB.resume_uploads_ok == 0:
+        _JOB.absorb_page_evidence()
+    outcome.resume_seen_on_page = _JOB.resume_seen_on_page
     said_easy_apply = "easy apply" in (outcome.detail or "").lower()
     if _JOB.easy_apply_seen and not _JOB.easy_apply_verified:
         outcome.resume_rule_violation = (

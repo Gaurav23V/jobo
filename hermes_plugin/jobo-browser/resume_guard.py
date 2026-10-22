@@ -50,6 +50,16 @@ judge_external() refuses a submit while this job's resume is not verified and
 either an upload of it failed or the form has a resume field. A form without
 any resume field still submits.
 
+A resumed draft (GHO-78, Verizon 2219 on 2026-10-22): Workday kept attempt 1's
+upload of this job's file, the agent's attempt 2 never uploaded again and sent
+the Review page with a direct browser_click on "Submit". The veto read the
+page, found this job's own file name and let it through, but only the
+driver's NEED_CLICK gate recorded that proof, so the audit called it a
+violation. The veto now records it in a file next to the state file
+(seen_file()), which the driver reads when it checks the resume rule. A page
+showing another job's file (or an older copy of this job's) and not ours is
+refused.
+
 The driver passes, through the agent's environment:
   JOBO_UPLOAD_RESUME_NAME   the file name our upload carries for this job
   JOBO_RESUME_GUARD_FILE    JSON {"verified": bool, "resume_uploads_ok": int,
@@ -194,6 +204,11 @@ EXTERNAL_INSPECT_JS = r"""(args) => {
   let text = (document.body && document.body.innerText) || '';
   for (const r of roots.slice(1)) text += '\n' + (r.textContent || '');
   const shown = !!low && text.toLowerCase().includes(low);
+  // Another of our per-job files (<First>_<Last>_Resume_<job>_<hash>.pdf): a
+  // draft that kept some other job's upload, or an older copy of this job's.
+  const stem = low.match(/^(.+_resume_)\d+_[0-9a-f]{6}\.\w+$/);
+  const otherRe = stem ? new RegExp(stem[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\d+_[0-9a-f]{6}\\.(?:pdf|docx?|rtf|odt|txt)', 'g') : null;
+  const others = otherRe ? [...new Set(text.toLowerCase().match(otherRe) || [])].filter(n => n !== low) : [];
   const label = b => norm(b.innerText || b.value || b.getAttribute('aria-label') || '');
   const control = el => el && el.closest ? el.closest('button, [role=button], a, input[type=submit], input[type=button]') : null;
   const isSubmit = el => { const c = control(el); return !!c && SUBMITISH.test(label(c)); };
@@ -205,7 +220,7 @@ EXTERNAL_INSPECT_JS = r"""(args) => {
   if (pt) hitSubmit = isSubmit(document.elementFromPoint(pt[0], pt[1]));
   return JSON.stringify({
     external: true, url: location.href, slots: slots.slice(0, 8),
-    shown_ours: shown, ours_in_input: oursInInput,
+    shown_ours: shown, ours_in_input: oursInInput, other_ours: others.slice(0, 3),
     active_is_submit: isSubmit(act) || implicit, point_hits_submit: hitSubmit,
   });
 }"""
@@ -290,6 +305,11 @@ def judge_external(states: list[dict], expected: str, guard: dict | None) -> tup
     for st in states or []:
         if st.get("shown_ours") or st.get("ours_in_input"):
             return True, f"the page shows this job's own file {expected}"
+    for st in states or []:
+        if st.get("other_ours"):
+            return False, (f"the page shows {', '.join(repr(n) for n in st['other_ours'])}, a resume "
+                           f"uploaded for another job (or an older copy of this job's), not this job's file "
+                           f"{expected!r}")
     failed = str(g.get("resume_upload_failed") or "").strip()
     if failed:
         return False, f"the upload of this job's resume was never verified (last UPLOAD_FAILED: {failed[:160]})"
@@ -411,6 +431,36 @@ def _verified() -> bool:
     return bool(_guard_state().get("verified"))
 
 
+def seen_file(state_file: str) -> str:
+    """Where the veto records a submit it allowed because the page showed this
+    job's own file (GHO-78). Lives next to the driver's state file."""
+    return os.path.join(os.path.dirname(state_file), "resume_seen.json") if state_file else ""
+
+
+def _record_seen(expected: str, what: str, states: list[dict]) -> None:
+    path = seen_file(os.environ.get(ENV_STATE, "").strip())
+    if not path:
+        return
+    url = next((s.get("url", "") for s in states if s.get("shown_ours") or s.get("ours_in_input")), "")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"upload_name": expected, "what": what, "url": url[:300]}, fh)
+    except OSError as e:  # the submit still goes through; the audit flags it
+        logger.warning("jobo resume guard could not record the page evidence: %s", e)
+
+
+def read_seen(state_file: str, expected: str) -> dict | None:
+    """The veto's record that a submit-like action went out on a page showing
+    `expected` (this job's own file), or None."""
+    path = seen_file(state_file)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and expected and data.get("upload_name") == expected else None
+
+
 # --- the pre_tool_call veto ---------------------------------------------------------
 
 
@@ -501,6 +551,8 @@ def _check_external(tool_name: str, args: dict, ref_name, base: str, expected: s
             return None
     ok, reason = judge_external(states, expected, guard)
     if ok:
+        if any(s.get("shown_ours") or s.get("ours_in_input") for s in states):
+            _record_seen(expected, what, states)
         return None
     logger.warning("jobo resume guard blocked %s (%s): %s", tool_name, what, reason)
     return refusal_message_external(reason, expected)

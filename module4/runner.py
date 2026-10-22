@@ -1290,6 +1290,7 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 "verified_resume_uploads": getattr(outcome, "resume_uploads_ok", 0),
                 "easy_apply_seen": getattr(outcome, "easy_apply_seen", False),
                 "easy_apply_card_verified": getattr(outcome, "easy_apply_resume_verified", False),
+                "seen_on_page": getattr(outcome, "resume_seen_on_page", False),
                 "rule_violation": getattr(outcome, "resume_rule_violation", ""),
             },
         )
