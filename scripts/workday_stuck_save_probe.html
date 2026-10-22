@@ -1,0 +1,165 @@
+<!doctype html>
+<!--
+Local copy of a Workday application step for GHO-72, built from the live
+Reputation "My Information" form (saved read-only 2026-10-22, nothing saved)
+plus the Verizon "Voluntary Disclosures" Race/Ethnicity grid as the agent's
+snapshots showed it. Markup attributes are the real ones; values are made up.
+  * Save and Continue (pageFooterNextButton) with a required field empty:
+    the button is disabled at once, ~300 ms later the "Errors Found" list
+    (errorHeading) and each field's inputAlert / aria-invalid appear, and the
+    button is enabled again from a requestAnimationFrame callback. A page
+    that draws no frames (window.__noFrames) keeps it disabled for good.
+  * Fixing a field clears its error at once (no frame needed).
+  * "How Did You Hear About Us?" is a search prompt: Enter with exactly one
+    search result picks it ("LinkedIn" -> "LinkedIn corporate page").
+  * "Have you ever been employed..." is <div aria-required name=...> holding
+    two radios; Race/Ethnicity marks every box required.
+  * Country Phone Code is a prompt whose pick is already there.
+  * A save with every field answered sets window.__saved.
+-->
+<html><head><meta charset="utf-8"><title>workday stuck save</title>
+<style>
+  body{font:14px sans-serif;margin:20px;padding-bottom:120px}
+  .wd-field{margin:12px 0}
+  .box{width:320px;border:1px solid #888;min-height:32px}
+  .box input{width:300px;height:28px;border:0}
+  .pills{margin:0;padding:0;list-style:none}
+  .popup{border:1px solid #888;width:320px;background:#fff}
+  [data-automation-id=errorHeading]{color:#b00}
+</style></head><body>
+
+<h3>My Information</h3>
+<div id="banner"></div>
+<div data-automation-id="formField-source" class="wd-field">
+  <label for="source--source"><span>How Did You Hear About Us?<abbr aria-hidden="true">*</abbr></span></label>
+  <div data-automation-id="multiSelectContainer" data-uxi-widget-type="multiselect">
+    <div class="box" data-automation-id="multiselectInputContainer">
+      <div data-automation-hiddensearch="false">
+        <input placeholder="Search" aria-required="true" aria-invalid="false" autocomplete="off" data-uxi-widget-type="selectinput" id="source--source" value="">
+        <div data-automation-id="promptAriaInstruction" aria-hidden="true">0 items selected</div>
+      </div>
+      <div><ul class="pills" role="listbox" data-automation-id="selectedItemList" aria-label="items selected"></ul></div>
+    </div>
+  </div>
+  <div class="alert"></div>
+</div>
+
+<div data-automation-id="formField-candidateIsPreviousWorker" class="wd-field">
+  <fieldset><legend><label id="radio-label7"><span>Have you ever been employed by Contoso in the past?<abbr aria-hidden="true">*</abbr></span></label></legend>
+    <div name="candidateIsPreviousWorker" aria-labelledby="radio-label7" id="previousWorker--candidateIsPreviousWorker" aria-required="true">
+      <label><input type="radio" name="candidateIsPreviousWorker" value="true" id="prev-yes"> Yes</label>
+      <label><input type="radio" name="candidateIsPreviousWorker" value="false" id="prev-no"> No</label>
+    </div>
+  </fieldset>
+  <div class="alert"></div>
+</div>
+
+<div data-automation-id="formField-legalName--firstName" class="wd-field">
+  <label for="name--legalName--firstName"><span>Given Name(s)<abbr aria-hidden="true">*</abbr></span></label>
+  <input type="text" id="name--legalName--firstName" name="legalName--firstName" aria-required="true" value="">
+  <div class="alert"></div>
+</div>
+
+<div data-automation-id="formField-countryPhoneCode" class="wd-field">
+  <label for="phoneNumber--countryPhoneCode"><span>Country Phone Code<abbr aria-hidden="true">*</abbr></span></label>
+  <div data-automation-id="multiSelectContainer" data-uxi-widget-type="multiselect">
+    <div class="box" data-automation-id="multiselectInputContainer">
+      <input placeholder="Search" aria-required="true" aria-invalid="false" data-uxi-widget-type="selectinput" id="phoneNumber--countryPhoneCode" value="">
+      <ul class="pills" role="listbox" data-automation-id="selectedItemList" aria-label="items selected">
+        <li><div role="option" data-automation-id="selectedItem" title="Freedonia (+99)"><p data-automation-id="promptOption">Freedonia (+99)</p></div></li>
+      </ul>
+    </div>
+  </div>
+  <div class="alert"></div>
+</div>
+
+<div data-automation-id="formField-ethnicityMulti" class="wd-field">
+  <fieldset><legend><label>Please provide your Race/Ethnicity details<abbr aria-hidden="true">*</abbr></label></legend>
+    <div role="grid" aria-label="grid">
+      <div role="row"><label><input type="checkbox" aria-required="true" id="race-a"> Group A (Freedonia)</label></div>
+      <div role="row"><label><input type="checkbox" aria-required="true" id="race-b"> Group B (Freedonia)</label></div>
+      <div role="row"><label><input type="checkbox" aria-required="true" id="race-c"> Prefer Not to Say (Freedonia)</label></div>
+    </div>
+  </fieldset>
+  <div class="alert"></div>
+</div>
+
+<div data-automation-id="pageFooter"><button data-automation-id="pageFooterNextButton">Save and Continue</button></div>
+
+<script>
+window.__noFrames = false; window.__saved = false; window.__saveClicks = 0;
+const $ = s => document.querySelector(s);
+const src = $('#source--source');
+const srcPills = src.closest('[data-automation-id=multiselectInputContainer]').querySelector('[data-automation-id=selectedItemList]');
+const LEAVES = ['Campus Campaign', 'Corporate Website', 'LinkedIn corporate page', 'Employee Referral'];
+const pick = t => {
+  srcPills.innerHTML = '<li><div role="option" data-automation-id="selectedItem"><p data-automation-id="promptOption"></p></div></li>';
+  srcPills.querySelector('[data-automation-id=selectedItem]').title = t;
+  srcPills.querySelector('p').textContent = t;
+  src.value = ''; closePopup(); revalidate();
+};
+let popup = null;
+const closePopup = () => { if (popup) { popup.remove(); popup = null; } };
+src.addEventListener('input', closePopup);
+src.addEventListener('keydown', ev => {
+  if (ev.key === 'Tab') { closePopup(); return; }
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  const q = src.value.trim().toLowerCase();
+  setTimeout(() => {
+    const hits = q ? LEAVES.filter(t => t.toLowerCase().includes(q)) : LEAVES;
+    if (hits.length === 1) return pick(hits[0]);   // Workday picks a lone result itself
+    closePopup();
+    popup = document.createElement('div'); popup.className = 'popup';
+    popup.innerHTML = '<div data-automation-id="activeListContainer" role="listbox"></div>';
+    for (const t of hits) {
+      const row = document.createElement('div'); row.setAttribute('role', 'option'); row.id = 'opt-' + t.length;
+      row.innerHTML = '<div data-automation-id="promptLeafNode" data-uxi-multiselectlistitem-hassidecharm="false"><input type="radio" data-automation-id="radioBtn"><div data-automation-id="promptOption"></div></div>';
+      row.querySelector('[data-automation-id=promptOption]').textContent = t;
+      row.addEventListener('click', () => pick(t));
+      popup.firstChild.appendChild(row);
+    }
+    src.closest('.wd-field').appendChild(popup);
+  }, 300);
+});
+const fields = () => [
+  ['How Did You Hear About Us?', src, () => !!srcPills.querySelector('[data-automation-id=selectedItem]')],
+  ['Have you ever been employed by Contoso in the past?', $('#prev-no'), () => !!$('input[name=candidateIsPreviousWorker]:checked')],
+  ['Given Name(s)', $('#name--legalName--firstName'), () => !!$('#name--legalName--firstName').value.trim()],
+  ['Please provide your Race/Ethnicity details', $('#race-a'), () => !![...document.querySelectorAll('[role=grid] input')].some(b => b.checked)],
+];
+let shown = false;
+const render = bad => {
+  const banner = $('#banner');
+  banner.innerHTML = '';
+  document.querySelectorAll('.alert').forEach(a => a.innerHTML = '');
+  document.querySelectorAll('[aria-invalid]').forEach(e => e.setAttribute('aria-invalid', 'false'));
+  if (!bad.length) return;
+  banner.innerHTML = '<div role="alert"><h3><button>Errors Found</button></h3><div data-automation-id="errorHeading"><ol></ol></div></div>';
+  bad.forEach(([name, el], i) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<div><button><span>Error</span><div aria-hidden="true">-</div></button><div id="hint' + i + '"></div></div>';
+    li.querySelector('button').append(name);
+    li.querySelector('div[id]').textContent = 'The field ' + name + ' is required and must have a value.';
+    banner.querySelector('ol').appendChild(li);
+    el.setAttribute('aria-invalid', 'true');
+    el.closest('.wd-field').querySelector('.alert').innerHTML = '<p data-automation-id="inputAlert">Error: The field ' + name + ' is required and must have a value.</p>';
+  });
+};
+const revalidate = () => { if (shown) render(fields().filter(f => !f[2]())); };
+document.addEventListener('change', revalidate);
+document.addEventListener('input', revalidate);
+const btn = $('[data-automation-id=pageFooterNextButton]');
+const raf = cb => window.__noFrames ? 0 : requestAnimationFrame(cb);
+btn.addEventListener('click', () => {
+  window.__saveClicks++;
+  btn.disabled = true;
+  setTimeout(() => {
+    const bad = fields().filter(f => !f[2]());
+    if (!bad.length) { window.__saved = true; return; }
+    shown = true; render(bad);
+    raf(() => { btn.disabled = false; });
+  }, 300);
+});
+</script>
+</body></html>

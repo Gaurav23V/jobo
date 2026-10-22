@@ -80,6 +80,7 @@ SUITES = (
     'test_workday_source_prompt', 'test_workday_step_budget',
     'test_external_resume_gate',
     'test_email_apply',
+    'test_workday_stuck_save',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',
@@ -94,6 +95,7 @@ SELF_ISOLATED = {
     'test_workday_click_filter', 'test_workday_create_account', 'test_avature_stale_numbers',
     'test_workday_source_prompt', 'test_workday_step_budget',
     'test_external_resume_gate',
+    'test_workday_stuck_save',
 }
 UNITTEST_SUITES = {'test_clicker', 'test_upload_stability', 'test_field_clear',
                    'test_workday_click_filter', 'test_workday_create_account'}
@@ -491,6 +493,10 @@ def environment(root: Path, port: int, chrome: str) -> dict[str, str]:
         # The attach canary (GHO-17) is a real agent turn, which these suites
         # refuse; suites that test it inject a fake attach_check instead.
         'JOBO_ATTACH_CANARY': '0',
+        # The frame keeper (GHO-72) would open a CDP socket to the stub
+        # browser URLs runner suites use; test_workday_stuck_save drives it
+        # directly against its own fixture browser.
+        'JOBO_FRAME_KEEPER': '0',
         # Suites always run as the fictional example person, never the real
         # personal/ config (policy/personal.py).
         'JOBO_PERSONAL_DIR': str(Path(__file__).resolve().parents[1] / 'personal.example'),

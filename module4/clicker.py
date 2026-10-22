@@ -8,6 +8,7 @@ when already checked. Submission evidence is compared with a pre-click baseline.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import re
@@ -16,11 +17,19 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from module4 import browser_session
 
 logger = logging.getLogger(__name__)
+
+# Shared with the Hermes plugin's pre-click veto (GHO-72): which required
+# fields are really unanswered, and what Workday itself flags.
+_WD_PATH = Path(__file__).resolve().parents[1] / "hermes_plugin" / "jobo-browser" / "workday_guard.py"
+_wd_spec = importlib.util.spec_from_file_location("jobo_workday_guard_shared", _WD_PATH)
+wd_guard = importlib.util.module_from_spec(_wd_spec)  # type: ignore[arg-type]
+_wd_spec.loader.exec_module(wd_guard)  # type: ignore[union-attr]
 
 try:
     import websocket  # type: ignore[import-untyped]
@@ -113,7 +122,7 @@ _CLICK_JS = r"""
 """ + _DOM_JS + r"""
   const want = norm(hint);
   const out = {ok: false, matched: '', strategy: '', note: '', candidates: [],
-    blocked_by: '', disabled: false, before_url: location.href,
+    blocked_by: '', disabled: false, missing: [], before_url: location.href,
     after_url: '', changed: '', control_kind: '', checked: null};
   const nativeCheck = 'input[type=checkbox], input[type=radio]';
   const collect = () => {
@@ -210,19 +219,21 @@ _CLICK_JS = r"""
     watching = false;
     return null;
   };
+  // Group-aware (GHO-72): one checked box answers a Race/Ethnicity grid, a
+  // Workday radio group is a <div aria-required>, a search prompt's picks are
+  // chips beside an input whose value stays "".
+  const unansweredNow = () => {
+    const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+__REQUIRED_JS__
+    return unanswered;
+  };
   const checkDisabled = () => {
     if (!disabled(target.el)) return false;
     out.disabled = true;
-    const missing = [];
-    for (const root of roots()) root.querySelectorAll('[required], [aria-required=true]')
-      .forEach(el => {
-        if (el.matches(':disabled')) return;
-        const check = el.matches(nativeCheck + ', [role=checkbox], [role=radio]');
-        const empty = check ? !readChecked(el) : !String(el.value || '').trim();
-        if (empty) missing.push((label(el) || el.id || '?').slice(0, 80));
-      });
+    const missing = unansweredNow().map(m => m.label + ' (' + m.why + ')');
+    out.missing = missing;
     out.note = 'the control is DISABLED, so no click was sent.' +
-      (missing.length ? ' Required fields still empty: ' + missing.slice(0, 10).join(' / ') : '');
+      (missing.length ? ' Required fields still unanswered: ' + missing.slice(0, 10).join(' / ') + '.' : '');
     return true;
   };
   const hit = (x, y) => {
@@ -327,7 +338,7 @@ _CLICK_JS = r"""
   };
   return {prepare, ready, observe, cleanup, domClick};
 })
-"""
+""".replace("__REQUIRED_JS__", wd_guard.REQUIRED_JS)
 _PAGE_STATE_JS = "(() => {" + _DOM_JS + "return pageState();})()"
 
 
@@ -351,8 +362,16 @@ class ClickResult:
     received: Optional[bool] = None
     # Same-site requests the page sent after the press: "POST /path -> 403".
     requests: list[str] = field(default_factory=list)
+    # Required fields really unanswered when the control was disabled (GHO-72).
+    missing: list[str] = field(default_factory=list)
+    # Disabled although nothing is unanswered and the site flags nothing.
+    stuck: bool = False
+    # Workday page button refused before any click (workday_guard.judge).
+    guard_refusal: str = ""
 
     def as_agent_message(self) -> str:
+        if self.guard_refusal:
+            return wd_guard.refusal_message(self.guard_refusal)
         name = self.matched or self.hint
         if self.control_kind in {"checkbox", "radio"}:
             if self.ok:
@@ -383,7 +402,14 @@ class ClickResult:
                     "and inspect the page. Do NOT click again or request NEED_CLICK "
                     "again while the outcome is unknown; that can duplicate submission.")
         lines = [f"CLICK_FAILED: {self.note or 'the click did not work'}"]
-        if self.disabled:
+        if self.stuck:
+            lines.append("No required field is unanswered and the site flags none, so "
+                         "re-selecting values will not help. Workday turns Save and "
+                         "Continue back on a moment after a save that failed validation. "
+                         "Take ONE fresh snapshot in a few seconds and ask for this click "
+                         "once more. If it is still disabled then, report STATUS: stuck "
+                         "quoting this message instead of changing fields.")
+        elif self.disabled:
             lines.append("Fix the cause, not the click: fill the fields named above "
                          "(use NEED_FIELDS to get their numbers), then ask for the click again.")
         elif self.blocked_by:
@@ -511,6 +537,50 @@ def _lost_click_reason(seen: dict, trusted: bool = True) -> str:
     return "only " + "/".join(seen["trusted_events"]) + " reached the page, no click" + focus
 
 
+# A requestAnimationFrame round trip: false when the page draws no frames
+# (headed browser on a locked screen, module4/frame_keeper.py).
+_FRAMES_JS = ("new Promise(r => { let n = 0; const tick = () => { if (++n < 3) "
+              "requestAnimationFrame(tick); else r(true); }; requestAnimationFrame(tick); "
+              "setTimeout(() => r(false), 800); })")
+_FOOTERISH = re.compile(r"^(save and continue|next|continue|submit|review)$", re.I)
+# (url, unanswered labels) -> NEED_CLICKs refused for that page state.
+_guard_blocks: dict[tuple, int] = {}
+
+
+def _inspect_workday(cdp: _Cdp) -> Optional[dict]:
+    try:
+        raw = _value(cdp.call("Runtime.evaluate", {
+            "expression": wd_guard.INSPECT_JS, "returnByValue": True}))
+        return json.loads(raw) if isinstance(raw, str) else None
+    except Exception as e:  # observation only
+        logger.debug("click: workday inspect failed: %s", e)
+        return None
+
+
+def _frames_running(cdp: _Cdp) -> Optional[bool]:
+    try:
+        return bool(_value(cdp.call("Runtime.evaluate", {
+            "expression": _FRAMES_JS, "awaitPromise": True, "returnByValue": True})))
+    except Exception:
+        return None
+
+
+def _explain_disabled(cdp: _Cdp, res: "ClickResult", cdp_url: str) -> None:
+    """Say what the site itself flags, and whether the page is drawing at all."""
+    state = _inspect_workday(cdp) or {}
+    site = state.get("site_errors") or state.get("invalid") or []
+    if site:
+        res.note += " The site's own error list: " + " / ".join(e.rstrip(". ") for e in site[:6]) + "."
+    frames = _frames_running(cdp)
+    if frames is False:
+        from module4 import frame_keeper
+
+        frame_keeper.ensure(cdp_url)
+        res.note += (" The page was drawing no frames (screen locked), which keeps "
+                     "Workday's button disabled; jobo has switched frame drawing back on.")
+    res.stuck = not res.missing and not site
+
+
 def click(cdp_url: str, hint: str = "") -> ClickResult:
     """Use only the first active page target, never another tab as a fallback.
 
@@ -531,6 +601,16 @@ def click(cdp_url: str, hint: str = "") -> ClickResult:
     try:
         with _Cdp(targets[0]["webSocketDebuggerUrl"]) as cdp:
             cdp.call("Runtime.enable")
+            if _FOOTERISH.match((hint or "").strip()):
+                state = _inspect_workday(cdp)
+                may, reason = wd_guard.judge(state, hint)
+                if not may:
+                    key = (state.get("url", ""), tuple(m["label"] for m in state.get("missing") or []))
+                    _guard_blocks[key] = _guard_blocks.get(key, 0) + 1
+                    if _guard_blocks[key] <= wd_guard.MAX_BLOCKS:
+                        res.guard_refusal = reason
+                        res.note = "Workday page button refused: " + reason
+                        return res
             plan = cdp.call("Runtime.evaluate", {
                 "expression": f"({_CLICK_JS})({json.dumps(hint)})",
                 "returnByValue": False,
@@ -538,9 +618,11 @@ def click(cdp_url: str, hint: str = "") -> ClickResult:
             try:
                 data = _on_plan(cdp, plan, "prepare")
                 for name in ("matched", "note", "candidates", "disabled", "blocked_by",
-                             "before_url", "control_kind"):
+                             "before_url", "control_kind", "missing"):
                     setattr(res, name, data[name])
                 if not data["ready"]:
+                    if res.disabled:
+                        _explain_disabled(cdp, res, cdp_url)
                     return res
                 if not data["already_checked"]:
                     cdp.call("Input.dispatchMouseEvent", {
@@ -552,7 +634,9 @@ def click(cdp_url: str, hint: str = "") -> ClickResult:
                 ready = _on_plan(cdp, plan, "ready")
                 if not ready["ready"]:
                     res.note, res.blocked_by = ready["note"], ready["blocked_by"]
-                    res.disabled = ready["disabled"]
+                    res.disabled, res.missing = ready["disabled"], ready["missing"]
+                    if res.disabled:
+                        _explain_disabled(cdp, res, cdp_url)
                     return res
                 if not ready["already_checked"] and (
                     data["already_checked"] or

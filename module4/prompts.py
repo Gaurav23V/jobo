@@ -617,6 +617,11 @@ one, follow its note instead of exploring from scratch.
   shows NO change at all (no error, no navigation), do not conclude the site
   is broken: use `NEED_CLICK: Create Account` (or the exact button label) once,
   which scrolls to it and sends a real mouse click on the overlay.
+  Answer every required field BEFORE Save and Continue: one press with a field
+  empty makes Workday disable the button behind an "Errors Found" list. To see
+  which field Workday still considers invalid, print NEED_FIELDS: it quotes
+  the site's own error list. A field it does not name is fine as it is; never
+  re-select committed values to "wake up" a disabled button.
 - **Rippling (ats.rippling.com)**: the form usually opens in a NEW TAB or
   popup. Snapshot after the click and make sure you are operating on the ATS
   tab, not the LinkedIn tab still behind it. Uploads: use NEED_UPLOAD, which

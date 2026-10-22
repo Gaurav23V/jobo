@@ -299,6 +299,15 @@ WIDGET_JS = r"""
           return {...out, ok:true, strategy:'workday-prompt-freetext', readback:typed,
             note:'this field takes free text; it was saved exactly as typed (not picked from a list)'};
         }
+        // Enter on a search with one result picks it (Reputation 1464, GHO-72:
+        // "LinkedIn" became the pill "LinkedIn corporate page" while we
+        // reported "no matching option" and burned two more attempts).
+        const auto=pills().find(t=>!pillsBefore.has(norm(t)));
+        if(auto) {
+          yield* closeList();
+          return {...out, ok:true, readback:auto,
+            note:'Workday picked "'+auto+'" itself, its search result for "'+want+'"; that is the value now'};
+        }
         found=leaves();
         if(found.some(n=>norm(leafText(n))===wantN)) break;
       }

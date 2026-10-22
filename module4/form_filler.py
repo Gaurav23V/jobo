@@ -306,6 +306,13 @@ __COLLECT__
             meta: c.meta.slice(0, 120), kind: kind, sig: c.sig,
             options: opts, value: cur,
             checked: ['radio','checkbox'].includes(el.type) ? !!el.checked : null,
+            // One checked box answers a multi-box question (Workday Race/
+            // Ethnicity marks every box required, GHO-72).
+            group_checked: el.type === 'checkbox' ? (() => {
+              const box = el.closest('fieldset, [role=group], [role=grid], [data-automation-id^="formField-"]');
+              const all = box ? [...box.querySelectorAll('input[type=checkbox]')] : [];
+              return all.length > 1 ? all.some(b => b.checked) : null;
+            })() : null,
             required: !!(el.required || el.getAttribute('aria-required') === 'true' ||
               el.closest('[aria-required=true]') || /\*\s*$/.test(c.label))};
   };
@@ -1192,6 +1199,8 @@ class FieldInfo:
     required: bool = False
     options: Optional[list[str]] = None
     checked: Optional[bool] = None
+    # For a box in a multi-box question: is any box of that question checked.
+    group_checked: Optional[bool] = None
 
     def as_line(self) -> str:
         bits = [f"#{self.index}", f"{self.label or self.meta or '(unlabelled)'}"]
@@ -1221,7 +1230,7 @@ class FieldInfo:
         if not self.required or self.kind == "radio":
             return False
         if self.kind == "checkbox":
-            return not self.checked
+            return not (self.checked or self.group_checked)
         return not self.value.strip()
 
 
@@ -1232,6 +1241,8 @@ class ListFieldsResult:
     note: str = ""
     # Controls on the page, including any beyond the 60 that are listed.
     total: int = 0
+    # What the site itself flags (Workday's "Errors Found" list), GHO-72.
+    site_errors: list[str] = field(default_factory=list)
 
     def required_summary(self) -> str:
         """Say which required fields are still empty, or that none are.
@@ -1246,6 +1257,11 @@ class ListFieldsResult:
         more = self.total - len(self.fields)
         tail = (f" Only the first {len(self.fields)} of {self.total} controls are "
                 "listed; check the rest of the page too.") if more > 0 else ""
+        if self.site_errors:
+            # The site's verdict beats our reading of the DOM: this is the
+            # answer to "which field is still invalid".
+            tail += ("\nThe site itself still flags: " + " / ".join(e.rstrip(". ") for e in self.site_errors[:8])
+                     + ". Fix exactly these; a field the site does not flag is fine as it is.")
         if empty:
             names = ", ".join(f"#{f.index} {f.label or f.meta or '(unlabelled)'}" for f in empty)
             return (f"Required and still EMPTY: {names}. Fill these. Leave fields that "
@@ -1484,6 +1500,7 @@ def list_fields(cdp_url: str) -> ListFieldsResult:
             if not raw:
                 return ListFieldsResult(ok=False, note="page returned no controls")
             data = json.loads(raw)
+            site_errors = _site_errors(cdp)
     except Exception as e:
         logger.warning("list_fields failed: %s", e)
         return ListFieldsResult(ok=False, note=str(e)[:120])
@@ -1499,11 +1516,27 @@ def list_fields(cdp_url: str) -> ListFieldsResult:
             required=bool(f.get("required")),
             options=f.get("options") or None,
             checked=f.get("checked"),
+            group_checked=f.get("group_checked"),
         )
         for i, f in enumerate(data.get("fields") or [])
     ]
     logger.info("list_fields: %d control(s) on the active page", len(fields))
-    return ListFieldsResult(ok=bool(fields), fields=fields, total=int(data.get("total") or len(fields)))
+    return ListFieldsResult(ok=bool(fields), fields=fields, total=int(data.get("total") or len(fields)),
+                            site_errors=site_errors)
+
+
+def _site_errors(cdp) -> list[str]:
+    """Workday's own "Errors Found" items / aria-invalid fields (observation only)."""
+    from module4 import clicker
+
+    try:
+        raw = cdp.call("Runtime.evaluate", {"expression": clicker.wd_guard.INSPECT_JS,
+                                            "returnByValue": True})["result"]["result"]["value"]
+        state = json.loads(raw) if isinstance(raw, str) else {}
+    except Exception as e:
+        logger.debug("list_fields: site error read failed: %s", e)
+        return []
+    return list(state.get("site_errors") or state.get("invalid") or [])
 
 
 # Said when an indexed set found its control at a new number (agent_driver

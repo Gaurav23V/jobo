@@ -34,6 +34,7 @@ from module4 import (
     circuit_breaker,
     constants,
     email_apply,
+    frame_keeper,
     google_forms,
     linkedin_router,
     linkedin_session,
@@ -672,24 +673,32 @@ def run_module4(
             return len(jobs) - result.attempted
 
         logger.info("Module 4: %s jobs queued for submission.", len(jobs))
+    kept: list[str] = []  # CDP URLs this call keeps frames on
     try:
         _apply_loop(session, jobs, result, left, dry_run=dry_run, force=force,
                     budget_check=budget_check, worker=worker,
-                    attach_check=attach_check, canary_only=canary_only)
+                    attach_check=attach_check, canary_only=canary_only, kept=kept)
     finally:
+        for url in kept:
+            frame_keeper.stop(url)
         if worker is not None:
             jobs.close()  # hands an untouched claim back to the queue
     return result
 
 
 def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, worker,
-                attach_check=None, canary_only=False) -> None:
+                attach_check=None, canary_only=False, kept=None) -> None:
+    kept = [] if kept is None else kept
     try:
         cdp = browser_session.ensure_browser_running(constants.browser_profile_dir())
     except RuntimeError as e:
         logger.error("Could not start/attach browser for apply stage: %s", e)
         result.details.append(f"ABORTED: browser startup failed: {e}")
         return
+    # Overnight the headed browser draws no frames, and Workday re-enables
+    # Save and Continue from an animation frame (GHO-72, module4/frame_keeper.py).
+    if frame_keeper.ensure(cdp):
+        kept.append(cdp)
 
     # Before the first claim: prove the agent drives this worker's browser.
     canary = _attach_canary_check(attach_check, cdp, worker)
@@ -944,6 +953,8 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             )
             break
         cdp = healthy_cdp
+        if frame_keeper.ensure(cdp) and cdp not in kept:  # a relaunch may move the URL
+            kept.append(cdp)
 
         # LinkedIn session check BEFORE spawning an agent. Every queued job
         # starts on a LinkedIn listing, so a signed-out browser fails them all

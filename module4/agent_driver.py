@@ -294,6 +294,8 @@ class _JobContext:
         # let a submit through because the form showed no resume field.
         self.resume_seen_on_page = False
         self.no_resume_field_at_submit = False
+        # Field key -> the options our last FIELD_SET_FAILED offered for it.
+        self.offered_options: dict[str, list[str]] = {}
 
     def mark_verified(self) -> None:
         self.easy_apply_verified = True
@@ -978,7 +980,13 @@ def _resolve_field(
         cdp_url, field_hint, value, index, form_filler=form_filler, job_id=job_id
     )
 
-    if failures.get(key, 0) >= MAX_FAILURES_PER_FIELD:
+    # A value picked from the list our own failure reply just offered is the
+    # answer we asked for, not a 4th guess (Reputation 1464, GHO-72: told
+    # "these are the ONLY values: Corporate Website", then refused that pick).
+    offered = _JOB.offered_options.pop(key, [])
+    picked_offer = (failures.get(key, 0) <= MAX_FAILURES_PER_FIELD and
+                    any(_norm_option(o) == _norm_option(value) for o in offered))
+    if failures.get(key, 0) >= MAX_FAILURES_PER_FIELD and not picked_offer:
         logger.warning(
             "[%s] Field %r failed %d times; telling the agent to move on.",
             job_id,
@@ -1030,6 +1038,8 @@ def _resolve_field(
         logger.warning("[%s] Field set not run for %s: %s", job_id, key, result.note[:100])
     else:
         failures[key] = failures.get(key, 0) + 1
+        if result.no_match and result.available_options:
+            _JOB.offered_options[key] = list(result.available_options)
         logger.warning(
             "[%s] Field set failed (%d/%d for %s): %s",
             job_id,
@@ -1040,6 +1050,10 @@ def _resolve_field(
         )
     message = result.as_agent_message()
     return f"{password_note}\n\n{message}" if password_note else message
+
+
+def _norm_option(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip().lower()
 
 
 _PASSWORD_LABEL_RE = re.compile(r"pass\s*word|passcode|\bpwd\b", re.I)
