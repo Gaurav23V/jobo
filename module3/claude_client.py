@@ -33,6 +33,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from module3.claude_auth import ClaudeAuthError, is_auth_error
 from module3.hermes_client import extract_json, repair_json
 
 logger = logging.getLogger(__name__)
@@ -136,10 +137,13 @@ def parse_response(stdout: str, response_model: type[T]) -> T:
     if isinstance(usage, dict):
         _record_usage(usage)
     if envelope.get("is_error"):
-        raise RuntimeError(
+        message = (
             f"claude returned an error ({envelope.get('subtype')}): "
             f"{str(envelope.get('result'))[:500]}"
         )
+        if is_auth_error(str(envelope.get("result"))):
+            raise ClaudeAuthError(message)
+        raise RuntimeError(message)
     structured = envelope.get("structured_output")
     if structured is not None:
         return response_model.model_validate(structured)
@@ -180,10 +184,16 @@ def generate_structured(
                     cwd=tmp,
                 )
                 if proc.returncode != 0 and not (proc.stdout or "").strip():
-                    raise RuntimeError(
-                        f"claude exited {proc.returncode}: {(proc.stderr or '')[:500]}"
-                    )
+                    message = f"claude exited {proc.returncode}: {(proc.stderr or '')[:500]}"
+                    if is_auth_error(proc.stderr):
+                        raise ClaudeAuthError(message)
+                    raise RuntimeError(message)
                 return parse_response(proc.stdout or "", response_model)
+            except ClaudeAuthError:
+                # The login is gone: a retry two seconds later gets the same
+                # answer (GHO-77: 3 calls a job, 462 for nothing). The runner
+                # stops the stage after a few of these.
+                raise
             except subprocess.TimeoutExpired:
                 last_err = f"timeout after {call_timeout()}s"
                 logger.warning(

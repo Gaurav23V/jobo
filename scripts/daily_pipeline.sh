@@ -11,6 +11,11 @@
 #   bash scripts/daily_pipeline.sh --budget-override
 #   (or JOBO_BUDGET_OVERRIDE=1 bash scripts/daily_pipeline.sh)
 # Never put the override in cron's environment.
+#
+# Claude login gate (GHO-77): the same gates first check Claude can
+# authenticate at all. If the host's login expired and can't be refreshed, the
+# run stops there (verdict FAILED_CLAUDE_AUTH, exit 2) instead of spending
+# triage on calls that all fail. The fix is `claude /login` on the host.
 
 set -u
 for arg in "$@"; do
@@ -123,15 +128,18 @@ else
   trap 'rm -rf "$LOCKDIR"' EXIT
 fi
 
+STAGE_RC=0
 run_stage() {
   local name="$1"; shift
   log "=== $name starting ==="
   if uv run jobo "$@" >> "$LOG" 2>&1; then
+    STAGE_RC=0
     log "=== $name OK ==="
     STAGE_VERDICTS+=("$name:OK")
     return 0
   else
     local rc=$?
+    STAGE_RC=$rc
     # Exit 3 is the honest-health signal: the stage RAN to completion but its
     # own outcome counters say it went badly (e.g. most jobs failed, or the
     # browser died mid-run). Distinguished from a real crash so the log says
@@ -140,6 +148,9 @@ run_stage() {
     if [ "$rc" -eq 3 ]; then
       log "!!! $name COMPLETED BUT DEGRADED - see the HEALTH lines above !!!"
       STAGE_VERDICTS+=("$name:DEGRADED")
+    elif [ "$rc" -eq 77 ]; then
+      log "!!! $name FAILED: Claude can't authenticate (claude_auth) - see the HEALTH lines above !!!"
+      STAGE_VERDICTS+=("$name:FAILED_CLAUDE_AUTH")
     else
       log "!!! $name FAILED (exit $rc) !!!"
       STAGE_VERDICTS+=("$name:FAILED")
@@ -149,19 +160,22 @@ run_stage() {
 }
 
 # Weekly Claude budget gate (module4/budget_guard.py via `jobo budget-gate`).
-# Returns 1 only when usage is at/over the threshold and no override is set;
+# Returns 1 when usage is at/over the threshold and no override is set (GATE_RC
+# 75), or when Claude can't authenticate (GATE_RC 77, module3/claude_auth.py);
 # leaves the gate's JSON in BUDGET_JSON, which write_verdict records. An unreadable
 # usage read, or the gate command itself breaking, proceeds as before (apply
 # still re-checks between jobs) - but says so loudly in the log.
 BUDGET_JSON=""
+GATE_RC=0
 budget_gate() {
   local stage="$1" err rc line
   err=$(mktemp)
   BUDGET_JSON=$(uv run jobo budget-gate --stage "$stage" 2>"$err")
   rc=$?
+  GATE_RC=$rc
   while IFS= read -r line; do log "$line"; done < "$err"
   rm -f "$err"
-  if [ "$rc" -ne 0 ] && [ "$rc" -ne 75 ]; then
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 75 ] && [ "$rc" -ne 77 ]; then
     log "BUDGET GATE ($stage): the gate command itself failed (exit $rc); weekly usage unknown - proceeding as before."
     BUDGET_JSON=""
   fi
@@ -170,10 +184,21 @@ budget_gate() {
     "{"*"}") ;;
     *) BUDGET_JSON="{\"gate\":\"$stage\",\"decision\":\"GATE_ERROR\",\"exit\":$rc}" ;;
   esac
-  [ "$rc" -ne 75 ]
+  [ "$rc" -ne 75 ] && [ "$rc" -ne 77 ]
+}
+
+# Claude can't authenticate (GHO-77): stop with a claude_auth verdict. The
+# skipped stages lose nothing: unscored and unapplied rows wait for the next run.
+stop_claude_auth() {
+  STAGE_VERDICTS+=("$@")
+  log "=== run stopped: Claude can't authenticate (claude_auth). Log in again on the host: claude /login ==="
+  write_verdict "FAILED_CLAUDE_AUTH"
+  notify_review "FAILED_CLAUDE_AUTH"
+  exit 2
 }
 
 if ! budget_gate "pipeline"; then
+  [ "$GATE_RC" -eq 77 ] && stop_claude_auth "claude_auth:FAILED"
   log "=== run skipped: Claude budget line reached (50% weekly or 30% of the 5h session) - no stage ran ==="
   write_verdict "SKIPPED_BUDGET"
   exit 0
@@ -216,6 +241,7 @@ if ! run_stage "prefilter" prefilter --quiet; then FAILED=1; fi
 # Re-check before triage: collector/enrich can take a while, and triage is the
 # first stage that spends Claude (`claude -p`). Apply re-checks between jobs.
 if ! budget_gate "triage"; then
+  [ "$GATE_RC" -eq 77 ] && stop_claude_auth "claude_auth:FAILED" "triage:SKIPPED_CLAUDE_AUTH" "apply:SKIPPED_CLAUDE_AUTH"
   STAGE_VERDICTS+=("triage:SKIPPED_BUDGET" "apply:SKIPPED_BUDGET")
   log "=== run stopped before triage: Claude budget line reached (50% weekly or 30% of the 5h session) ==="
   write_verdict "STOPPED_BUDGET"
@@ -225,7 +251,11 @@ fi
 
 # Stage 3: triage rows with module2_enriched_at set that lack fit scores.
 # Phase-1 skip rule makes this a no-op for already-scored jobs.
-if ! run_stage "triage" triage --quiet; then FAILED=1; fi
+if ! run_stage "triage" triage --quiet; then
+  FAILED=1
+  # The login died after the gate: apply's agents need it too.
+  [ "$STAGE_RC" -eq 77 ] && stop_claude_auth "apply:SKIPPED_CLAUDE_AUTH"
+fi
 
 # Without Hermes' Claude plugin turning off Claude Code's session-title request,
 # every apply agent answers with a session-title JSON and no verdict (GHO-10).

@@ -22,6 +22,12 @@ Failures are clustered by (signature, ATS host):
     so the same failure gets the same signature in every run. An unmatched
     reason falls back to "other:<status prefix>".
 
+A run-wide cause (GHO-77: the host's Claude login had expired, so triage and
+the apply canary all failed on it) is reported above the clusters and kept in
+the ledger as a stage:<name> signature on host "pipeline", like the
+stage:directsdk_patch row: it is found from the run's verdict line and from
+Claude authentication errors anywhere in the log, so older logs show it too.
+
 The failure ledger (db.models.FailureLedgerModel) is the one thing this writes:
 per-run rows in failure_ledger_runs are replaced, not added to, so reporting
 the same log twice does not double-count.
@@ -38,6 +44,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from db.models import FailureLedgerModel, FailureLedgerRunModel, JobModel
+from module3.claude_auth import AUTH_ERROR_RE, FIX_HINT
 from module4.apply_queue import company_key, family_for_url
 from module4.funnel import compute_funnel, run_window_from_log
 
@@ -135,6 +142,10 @@ _KEEP_WORDS = frozenset({
     "workday", "greenhouse", "lever", "ashby", "avature", "successfactors",
 })
 _RULE_BUCKET = {key: bucket for key, bucket, _ in SIGNATURE_RULES}
+# Run-wide causes (host "pipeline"). The host's Claude login is G's to fix.
+CLAUDE_AUTH_SIGNATURE = "stage:claude_auth"
+PIPELINE_HOST = "pipeline"
+_RULE_BUCKET[CLAUDE_AUTH_SIGNATURE] = "needs_g"
 
 _URL = re.compile(r"(?:https?|mailto|ftp):\S*")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
@@ -214,6 +225,70 @@ _APPLYING = re.compile(r"\[(\d+)\] Applying\b")
 _ROUTED = re.compile(r"\[(\d+)\] Routed: \w+(?: (https?://\S+))?")
 
 
+_STAGE_START = re.compile(r"=== (\w+) starting ===")
+_AUTH_GATE = re.compile(r"CLAUDE AUTH GATE \(\w+\)")
+
+
+@dataclass
+class AuthFailures:
+    lines: int = 0
+    stages: list[str] = field(default_factory=list)
+    job_ids: set[int] = field(default_factory=set)
+    sample: str = ""
+
+
+def auth_failures_from_log(log_path: Path) -> AuthFailures:
+    """Claude authentication errors anywhere in the run log, by stage."""
+    out = AuthFailures()
+    stage = "pipeline"
+    with log_path.open(errors="replace") as f:
+        for line in f:
+            m = _STAGE_START.search(line)
+            if m:
+                stage = m.group(1)
+                continue
+            m = AUTH_ERROR_RE.search(line)
+            if not m:
+                continue
+            out.lines += 1
+            where = "gate" if _AUTH_GATE.search(line) else stage
+            if where not in out.stages:
+                out.stages.append(where)
+            out.job_ids.update(int(j) for j in _JOB_ID.findall(line))
+            if not out.sample:
+                out.sample = line[m.start():].strip()[:300]
+    return out
+
+
+def claude_auth_cause(verdict: dict | None, log_path: Path) -> Cluster | None:
+    """The run-wide claude_auth cause, or None if this run had none."""
+    found = auth_failures_from_log(log_path)
+    v = verdict or {}
+    # claude_auth:FAILED (a gate) or triage:FAILED_CLAUDE_AUTH; not the stages
+    # skipped because of it.
+    flagged = [
+        "gate" if s.get("stage") == "claude_auth" else str(s.get("stage"))
+        for s in v.get("stages") or []
+        if str(s.get("verdict")) == "FAILED_CLAUDE_AUTH"
+        or (s.get("stage") == "claude_auth" and str(s.get("verdict")) == "FAILED")
+    ]
+    if not found.lines and not flagged and v.get("overall") != "FAILED_CLAUDE_AUTH":
+        return None
+    stages = list(found.stages)
+    for name in flagged:
+        if name not in stages:
+            stages.append(name)
+    return Cluster(
+        signature=CLAUDE_AUTH_SIGNATURE,
+        ats_host=PIPELINE_HOST,
+        job_ids=sorted(found.job_ids),
+        count=found.lines,
+        sample_reason=found.sample or "the run's verdict says Claude can't authenticate",
+        suggested_bucket=suggested_bucket(CLAUDE_AUTH_SIGNATURE),
+        stages=stages,
+    )
+
+
 @dataclass
 class RunLogJobs:
     touched: set[int] = field(default_factory=set)
@@ -281,6 +356,7 @@ class Cluster:
     repeat: bool = False
     repeat_runs: int = 0
     ledger: dict | None = None
+    stages: list[str] = field(default_factory=list)  # run-wide causes only
 
 
 @dataclass
@@ -301,6 +377,8 @@ class RunReport:
     attempted_rate: dict
     clusters: list[Cluster]
     carried_over: list[int]
+    # Run-wide causes (stage:<name> @ pipeline), shown before the clusters.
+    causes: list[Cluster] = field(default_factory=list)
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -363,10 +441,12 @@ def build_report(
         for (sig, host), members in groups.items()
     ]
     clusters.sort(key=lambda c: (-c.count, c.signature, c.ats_host))
+    auth = claude_auth_cause(verdict, run_log)
+    causes = [auth] if auth else []
 
     if update_ledger:
-        upsert_run(session, log_key, run_ts, clusters)
-    _annotate_from_ledger(session, clusters, log_key, run_ts)
+        upsert_run(session, log_key, run_ts, causes + clusters)
+    _annotate_from_ledger(session, causes + clusters, log_key, run_ts)
 
     return RunReport(
         run_log=log_key,
@@ -397,6 +477,7 @@ def build_report(
         },
         clusters=clusters,
         carried_over=carried,
+        causes=causes,
     )
 
 
@@ -558,6 +639,17 @@ def render_text(report: RunReport, cap: int = TEXT_CLUSTER_CAP) -> str:
             f" (threshold {_pct(b.get('threshold'))}), session {_pct(b.get('session_utilization'))}"
             + (f", error: {b['error']}" if b.get("error") else "")
         )
+    for c in report.causes:
+        led = c.ledger or {}
+        ledger = f"ledger {led.get('status')}" + (f" {led['issue']}" if led.get("issue") else "") if led else "ledger -"
+        repeat = f"; repeat x{c.repeat_runs} earlier run{'s' if c.repeat_runs != 1 else ''}" if c.repeat else ""
+        lines.append(
+            f"  CAUSE: Claude can't authenticate ({c.signature} @ {c.ats_host}) in "
+            f"{', '.join(c.stages) or 'the run'}: {c.count} auth error line(s), "
+            f"{len(c.job_ids)} job(s) hit  [suggest {c.suggested_bucket}{repeat}]  {ledger}"
+        )
+        lines.append(f"    sample: {c.sample_reason[:200]}")
+        lines.append(f"    fix: {FIX_HINT}")
     f = report.funnel
     rate = "undefined" if f["apply_rate"] is None else f"{f['apply_rate']:.1%}"
     lines.append(

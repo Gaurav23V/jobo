@@ -85,6 +85,35 @@ def read_access_token(host_home: Path | None = None) -> str | None:
     return token
 
 
+def _ms_to_iso(ms) -> str:
+    try:
+        return datetime.fromtimestamp(float(ms) / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "?"
+
+
+def token_problem(host_home: Path | None = None) -> str:
+    """Why read_access_token() found no usable token (GHO-77): no file, no
+    token, or expired (and when). Never includes the token itself."""
+    path = credentials_path(host_home)
+    try:
+        data = json.loads(path.read_text())
+    except OSError:
+        return f"no credentials file at {path}"
+    except json.JSONDecodeError:
+        return f"credentials file {path} is not JSON"
+    oauth = (data.get("claudeAiOauth") if isinstance(data, dict) else None) or {}
+    if not oauth.get("accessToken"):
+        return f"no OAuth access token in {path}"
+    msg = f"OAuth access token in {path} expired at {_ms_to_iso(oauth.get('expiresAt'))}"
+    refresh_expires = oauth.get("refreshTokenExpiresAt")
+    if not oauth.get("refreshToken"):
+        msg += ", and there is no refresh token"
+    elif refresh_expires and time.time() * 1000 >= refresh_expires:
+        msg += f", refresh token expired at {_ms_to_iso(refresh_expires)}"
+    return msg
+
+
 def fetch_usage(token: str, *, timeout: float = 15.0) -> tuple[dict | None, str | None]:
     """(usage payload, error) from the usage endpoint.
 

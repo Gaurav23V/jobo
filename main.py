@@ -15,7 +15,8 @@ import click
 from db.database import get_session, init_db
 from module1.runner import run as run_collector
 from module2.runner import run_enrich
-from module3.runner import run_module3
+from module3 import claude_auth
+from module3.runner import run_module3, triage_health
 from module4 import budget_guard
 from module4.funnel import compute_funnel, run_window_from_log
 from module4.runner import health_verdict, run_module4
@@ -272,6 +273,11 @@ def triage(
         if result.phase2_closed:
             click.echo(f"  Phase 2 closed (dead listing, no materials made): {result.phase2_closed}")
         click.echo(f"  Failed: {result.failed}")
+        if result.auth_failures or result.auth_skipped:
+            click.echo(
+                f"  Claude auth failures: {result.auth_failures}; left for the next run: "
+                f"{result.auth_skipped}"
+            )
         if result.llm_usage:
             click.echo(f"  LLM usage: {result.llm_usage}")
         if result.errors:
@@ -284,6 +290,16 @@ def triage(
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise click.Abort()
+
+    # Honest exit status, like apply's (GHO-77): 154 of 154 fit calls failed on
+    # an expired Claude login and the pipeline still printed "triage OK".
+    # 4 = FAILED; claude_auth.AUTH_EXIT tells daily_pipeline.sh to stop the run.
+    health = triage_health(result)
+    click.echo(f"\n  HEALTH: {health.label}")
+    for r in health.reasons:
+        click.echo(f"    ! {r}")
+    if health.exit_code:
+        sys.exit(health.exit_code)
 
 
 @cli.command("all")
@@ -629,18 +645,31 @@ def budget_gate(stage: str, override: bool):
     """Weekly Claude budget gate for scripts/daily_pipeline.sh.
 
     Exit 0 = proceed (including when usage is unreadable), exit
+    77 = Claude can't authenticate (the login expired; GHO-77), exit
     75 = at/over JOBO_BUDGET_THRESHOLD (default 0.50) weekly, or at/over
     JOBO_SESSION_THRESHOLD (default 0.30) of the 5-hour session
     (the account is shared with other work; the override does not lift this), do not run. stdout
     is one JSON object for the verdict line; stderr is one human log line.
     """
 
+    # Can Claude authenticate at all (GHO-77)? An expired login is not
+    # "usage unreadable": every Claude stage would fail, so stop the run.
+    auth = claude_auth.check_auth()
+    auth_msg = claude_auth.gate_message(auth, stage)
+    if auth_msg:
+        click.echo(auth_msg, err=True)
+    if auth.failed:
+        click.echo(json.dumps({
+            "gate": stage, "decision": "FAILED_CLAUDE_AUTH", "claude_auth": auth.record(),
+        }))
+        sys.exit(claude_auth.AUTH_EXIT)
+
     check = budget_guard.check_budget(
         threshold=budget_guard.threshold_from_env(),
         override=override or budget_guard.override_from_env(),
     )
     click.echo(budget_guard.gate_message(check, stage), err=True)
-    click.echo(json.dumps(budget_guard.gate_record(check, stage)))
+    click.echo(json.dumps({**budget_guard.gate_record(check, stage), "claude_auth": auth.record()}))
     stop = check.should_stop or check.session_limited
     sys.exit(budget_guard.GATE_STOP_EXIT if stop else 0)
 

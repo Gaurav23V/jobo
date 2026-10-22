@@ -6,7 +6,9 @@
 #   - `uv` is a stub: pipeline stages only record that they ran, and
 #     `uv run jobo budget-gate` runs the real main.py CLI with the usage read
 #     replaced by a scripted value (FAKE_UTILS: one value per gate call,
-#     "none" = unreadable, "crash" = the gate command itself fails).
+#     "none" = unreadable, "crash" = the gate command itself fails), and its
+#     Claude login check by FAKE_AUTHS (GHO-77; one per gate call: "ok",
+#     "dead" = claude can't authenticate, "unknown" = the probe was inconclusive).
 set -u
 REAL_REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="$REAL_REPO/.venv/bin/python"
@@ -43,6 +45,16 @@ def fake_fetch(token, timeout=15.0):
         "five_hour": {"utilization": float(os.environ.get("FAKE_SESSION", "22")), "resets_at": "2026-10-15T16:29:59+00:00"},
     }, None
 budget_guard.fetch_usage = fake_fetch
+from module3 import claude_auth
+auths = (os.environ.get("FAKE_AUTHS") or "ok").split(",")
+auth = auths[min(n, len(auths) - 1)]
+EXPIRED = "Failed to authenticate: OAuth session expired and could not be refreshed"
+if auth == "dead":
+    claude_auth.check_auth = lambda: claude_auth.AuthCheck(
+        "FAILED", f"OAuth access token expired; probe call: {EXPIRED}", probed=True)
+elif auth == "unknown":
+    claude_auth.check_auth = lambda: claude_auth.AuthCheck(
+        "UNKNOWN", "OAuth access token expired; auth probe timed out after 90s", probed=True)
 import main
 sys.argv = ["jobo", *sys.argv[1:]]
 main.cli()
@@ -57,9 +69,12 @@ if [ "$1" = "budget-gate" ]; then
 fi
 echo "$1 override=${JOBO_BUDGET_OVERRIDE:-}" >> "$STAGES_FILE"
 # FAKE_STAGE_OUT_<command> is printed (e.g. a Gmail auth error); a command in
-# FAKE_FAIL_STAGES (space separated) exits 1.
+# FAKE_FAIL_STAGES (space separated) exits 1; FAKE_STAGE_RC_<command> exits
+# with that status (77 = Claude can't authenticate, GHO-77).
 var="FAKE_STAGE_OUT_${1//-/_}"
 [ -n "${!var:-}" ] && echo "${!var}"
+rcvar="FAKE_STAGE_RC_${1//-/_}"
+[ -n "${!rcvar:-}" ] && { echo "stub $1 exit ${!rcvar}"; exit "${!rcvar}"; }
 case " ${FAKE_FAIL_STAGES:-} " in *" $1 "*) echo "stub $1 failed"; exit 1 ;; esac
 echo "stub $1 ok"
 EOF
@@ -216,6 +231,48 @@ echo
 echo "14. A jobfound error mentioning 401 does not trip the Gmail-auth abort"
 run_pipeline "0.10" "FAKE_STAGE_OUT_collect_jobfound=HttpError 401 from somewhere"
 check "$([ "$RC" -eq 0 ] && [ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "exit 0, every stage ran (rc=$RC)"
+
+echo
+echo "15. Claude login dead at the start -> no stage runs, FAILED_CLAUDE_AUTH, exit 2 (GHO-77)"
+run_pipeline "0.10" FAKE_AUTHS=dead
+check "$([ "$RC" -eq 2 ] && [ -z "$(stages)" ] && echo yes || echo no)" "exit 2, no stage ran (rc=$RC, ran: '$(stages)')"
+check "$([ "$(verdict 'v["overall"]')" = FAILED_CLAUDE_AUTH ] && echo yes || echo no)" "verdict overall FAILED_CLAUDE_AUTH"
+check "$([ "$(verdict '",".join(s["stage"]+":"+s["verdict"] for s in v["stages"])')" = "claude_auth:FAILED" ] && echo yes || echo no)" "stage verdicts: claude_auth:FAILED"
+check "$([ "$(verdict 'v["budget"]["decision"]')" = FAILED_CLAUDE_AUTH ] && echo yes || echo no)" "gate record decision FAILED_CLAUDE_AUTH"
+check "$(loggrep 'CLAUDE AUTH GATE (pipeline): FAILED - Claude can.t authenticate')" "run log has the auth gate line"
+check "$(loggrep 'OAuth session expired and could not be refreshed')" "run log has claude's own words"
+check "$([ "$(loggrep 'UNREADABLE')" = no ] && echo yes || echo no)" "not reported as 'usage UNREADABLE'"
+check "$(loggrep 'review webhook: skipped')" "FAILED_CLAUDE_AUTH reaches the review webhook"
+run_pipeline "0.10" FAKE_AUTHS=dead -- --budget-override
+check "$([ "$RC" -eq 2 ] && [ -z "$(stages)" ] && echo yes || echo no)" "--budget-override does not lift it (rc=$RC)"
+
+echo
+echo "16. Login dies between the gates -> stops before triage, triage/apply SKIPPED_CLAUDE_AUTH"
+run_pipeline "0.10" FAKE_AUTHS=ok,dead
+check "$([ "$RC" -eq 2 ] && [ "$(stages)" = "collector collect-jobfound enrich prefilter" ] && echo yes || echo no)" "exit 2, triage and apply did not run (rc=$RC, ran: '$(stages)')"
+check "$([ "$(verdict '",".join(s["stage"]+":"+s["verdict"] for s in v["stages"])')" = "collector:OK,jobfound:OK,enrich:OK,prefilter:OK,claude_auth:FAILED,triage:SKIPPED_CLAUDE_AUTH,apply:SKIPPED_CLAUDE_AUTH" ] && echo yes || echo no)" "stage verdicts show the auth stop"
+check "$(loggrep 'CLAUDE AUTH GATE (triage): FAILED')" "run log names the triage gate"
+
+echo
+echo "17. Triage itself stops on the login (exit 77) -> apply skipped, FAILED_CLAUDE_AUTH"
+run_pipeline "0.10" FAKE_STAGE_RC_triage=77
+check "$([ "$RC" -eq 2 ] && [ "$(stages)" = "collector collect-jobfound enrich prefilter triage" ] && echo yes || echo no)" "exit 2, apply did not run (rc=$RC, ran: '$(stages)')"
+check "$([ "$(verdict 'v["overall"]')" = FAILED_CLAUDE_AUTH ] && echo yes || echo no)" "verdict overall FAILED_CLAUDE_AUTH"
+check "$([ "$(verdict '",".join(s["stage"]+":"+s["verdict"] for s in v["stages"])')" = "collector:OK,jobfound:OK,enrich:OK,prefilter:OK,triage:FAILED_CLAUDE_AUTH,apply:SKIPPED_CLAUDE_AUTH" ] && echo yes || echo no)" "stage verdicts: triage:FAILED_CLAUDE_AUTH, apply:SKIPPED_CLAUDE_AUTH"
+check "$(loggrep '!!! triage FAILED: Claude can.t authenticate (claude_auth)')" "run log says why triage failed"
+
+echo
+echo "18. Triage fails every job for another reason (exit 4) -> FAILED, apply still runs"
+run_pipeline "0.10" FAKE_STAGE_RC_triage=4
+check "$([ "$RC" -eq 1 ] && [ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "exit 1, apply ran (rc=$RC, ran: '$(stages)')"
+check "$([ "$(verdict '[s["verdict"] for s in v["stages"] if s["stage"]=="triage"][0]')" = FAILED ] && [ "$(verdict 'v["overall"]')" = FAILED ] && echo yes || echo no)" "triage:FAILED, overall FAILED (not OK)"
+
+echo
+echo "19. Auth probe inconclusive -> proceeds as before, logged"
+run_pipeline "0.10" FAKE_AUTHS=unknown
+check "$([ "$RC" -eq 0 ] && [ "$(stages)" = "collector collect-jobfound enrich prefilter triage apply" ] && echo yes || echo no)" "exit 0, every stage ran (rc=$RC)"
+check "$(loggrep 'CLAUDE AUTH GATE (pipeline): UNKNOWN')" "run log says UNKNOWN"
+check "$([ "$(verdict 'v["budget"]["claude_auth"]["decision"]')" = UNKNOWN ] && echo yes || echo no)" "verdict records the auth check"
 
 echo
 if [ "$fail" -eq 0 ]; then
