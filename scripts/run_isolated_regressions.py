@@ -81,6 +81,7 @@ SUITES = (
     'test_external_resume_gate',
     'test_email_apply',
     'test_workday_stuck_save',
+    'test_claude_auth',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',

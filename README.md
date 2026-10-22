@@ -309,7 +309,7 @@ check, `triage`, `apply
 --form-workers 3` (`JOBO_APPLY_FORM_WORKERS`). It writes a log per run to
 `data/logs/run_<YYYYMMDD_HHMM>.log` and one JSON verdict line per run to
 `data/logs/pipeline_verdicts.jsonl` (`OK`, `FAILED`, `SKIPPED_BUDGET`,
-`STOPPED_BUDGET`, `FAILED_GMAIL_AUTH`, `SKIPPED_OVERLAP`). A lock
+`STOPPED_BUDGET`, `FAILED_GMAIL_AUTH`, `FAILED_CLAUDE_AUTH`, `SKIPPED_OVERLAP`). A lock
 (`/tmp/jobo_pipeline.lock`, via `flock`) makes sure only one run happens at a
 time; a run that finds the lock taken skips its slot.
 
@@ -425,6 +425,14 @@ BUDGET GATE (check): weekly Claude usage 21% < 50% threshold, ... - proceeding. 
 Exit code 0 means go ahead, 75 means over a limit. `bash
 scripts/daily_pipeline.sh --budget-override` (or `JOBO_BUDGET_OVERRIDE=1`) lifts
 the weekly limit for that one run. Never put it in cron's environment.
+
+The same check first makes sure Claude can log in at all. If the access token
+in `~/.claude/.credentials.json` has expired, it makes one tiny `claude -p`
+call, which renews the login when it can. If that call fails to authenticate,
+the gate exits 77 and the run stops (`FAILED_CLAUDE_AUTH`, exit 2) instead of
+running triage on calls that would all fail. Fix it with `claude /login` on the
+host. Triage also stops after 3 authentication failures and exits 77, and
+`jobo run-report` shows the cause as `stage:claude_auth @ pipeline`.
 
 ## Tests
 

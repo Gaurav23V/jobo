@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +33,7 @@ from module3 import (
     resume_guard,
     resume_splice,
 )
+from module3.claude_auth import AUTH_EXIT, FIX_HINT, ClaudeAuthError
 from module3.schema import FitDecisionOutput, MaterialsOutput, ResumeSectionsOutput
 from module4 import persist as apply_persist
 from module4 import preflight
@@ -44,6 +45,10 @@ logger = logging.getLogger(__name__)
 # never made it on attempt 3 either - that third call was paid for and then
 # thrown away in favour of the default resume anyway.
 MAX_MATERIALS_ATTEMPTS = 2
+
+# Stop the stage after this many Claude authentication failures (GHO-77): the
+# login is gone and every further call fails the same way.
+AUTH_FAILURE_LIMIT = 3
 
 
 @dataclass
@@ -57,6 +62,38 @@ class Module3Result:
     failed: int = 0
     errors: list[str] = field(default_factory=list)
     llm_usage: str = ""
+    # GHO-77: calls that failed on the Claude login, jobs left untouched once
+    # the stage stopped on it, and the stop reason (empty = did not stop).
+    auth_failures: int = 0
+    auth_skipped: int = 0
+    auth_error: str = ""
+
+    @property
+    def succeeded(self) -> int:
+        return self.phase1_run + self.phase2_run + self.phase2_closed
+
+
+@dataclass
+class TriageHealth:
+    label: str  # OK, FAILED, FAILED (claude_auth)
+    exit_code: int  # 0, 4, claude_auth.AUTH_EXIT
+    reasons: list[str] = field(default_factory=list)
+
+
+def triage_health(result: Module3Result) -> TriageHealth:
+    """The stage verdict from its own counters (GHO-77: 154 of 154 failed and
+    the pipeline still printed "=== triage OK ===")."""
+    if result.auth_error:
+        return TriageHealth("FAILED (claude_auth)", AUTH_EXIT, [
+            f"Claude can't authenticate: {result.auth_error[:300]}",
+            f"stopped after {result.auth_failures} auth failure(s); {result.auth_skipped} job(s) "
+            f"left for the next run; {FIX_HINT}",
+        ])
+    if result.failed and not result.succeeded:
+        return TriageHealth("FAILED", 4, [
+            f"every Claude call failed ({result.failed} of {result.failed}); nothing was triaged",
+        ])
+    return TriageHealth("OK", 0)
 
 
 def _paths_complete(job) -> bool:
@@ -347,6 +384,8 @@ def run_module3(
         introduction_markdown=intro_md, base_resume_latex=base_tex
     )
 
+    last_auth_error = ""
+
     # ---------------- Phase 1: fit decisions in parallel ----------------
     to_fit = []
     apply_jobs = []
@@ -398,16 +437,42 @@ def run_module3(
         with ThreadPoolExecutor(max_workers=_workers()) as ex:
             # Run one call on its own first: it stores the shared system prompt
             # in the cache, so the parallel calls after it read it back cheaply
-            # instead of all twelve writing it at once.
-            first = ex.submit(do_fit, tasks[0])
-            wait([first])
-            futures = {first: tasks[0][0]}
-            futures.update({ex.submit(do_fit, task): task[0] for task in tasks[1:]})
+            # instead of all twelve writing it at once. While those warm-up
+            # calls fail on the Claude login, keep going one at a time, so a
+            # dead login costs AUTH_FAILURE_LIMIT calls, not one per job.
+            futures = {}
+            submitted = 0
+            warm_auth_failures = 0
+            while submitted < len(tasks):
+                warm = ex.submit(do_fit, tasks[submitted])
+                futures[warm] = tasks[submitted][0]
+                submitted += 1
+                wait([warm])
+                if not isinstance(warm.exception(), ClaudeAuthError):
+                    break
+                warm_auth_failures += 1
+                if warm_auth_failures >= AUTH_FAILURE_LIMIT:
+                    break
+            if warm_auth_failures < AUTH_FAILURE_LIMIT:
+                futures.update({ex.submit(do_fit, task): task[0] for task in tasks[submitted:]})
+                submitted = len(tasks)
+            result.auth_skipped += len(tasks) - submitted
             for fut in as_completed(futures):
                 jid = futures[fut]
                 try:
                     _jid, company, url, fit = fut.result()
+                except CancelledError:
+                    result.auth_skipped += 1
+                    continue
                 except Exception as e:
+                    if isinstance(e, ClaudeAuthError):
+                        result.auth_failures += 1
+                        last_auth_error = str(e)
+                        if result.auth_failures >= AUTH_FAILURE_LIMIT and not result.auth_error:
+                            result.auth_error = str(e)
+                            # Calls already running finish; queued ones never start.
+                            for other in futures:
+                                other.cancel()
                     # A failed LLM call can leave the SQLite session in a bad
                     # state; roll back so later jobs aren't poisoned by it.
                     session.rollback()
@@ -451,11 +516,20 @@ def run_module3(
         result.phase1_run = done
 
     # ---------------- Phase 2: materials + PDFs, sequential ----------------
+    if result.auth_error and apply_jobs:
+        logger.warning(
+            "Claude can't authenticate; skipping materials for %s job(s).", len(set(apply_jobs))
+        )
+        result.auth_skipped += len(set(apply_jobs))
+        apply_jobs = []
     seen = set()
     for jid in apply_jobs:
         if jid in seen:
             continue
         seen.add(jid)
+        if result.auth_error:
+            result.auth_skipped += 1
+            continue
 
         fresh = session.get(JobModel, jid)
         if fresh is None:
@@ -502,6 +576,15 @@ def run_module3(
                 ),
                 response_model=MaterialsOutput,
             )
+        except ClaudeAuthError as e:
+            result.failed += 1
+            result.auth_failures += 1
+            last_auth_error = str(e)
+            result.errors.append(f"job_id={jid} url={fresh.job_url}: materials: {e}")
+            logger.warning("Materials failed for job_id=%s: %s", jid, e)
+            if result.auth_failures >= AUTH_FAILURE_LIMIT:
+                result.auth_error = str(e)
+            continue
         except Exception as e:
             result.failed += 1
             result.errors.append(f"job_id={jid} url={fresh.job_url}: materials: {e}")
@@ -564,6 +647,16 @@ def run_module3(
         except Exception as e:  # pragma: no cover - audit trail only, never block the run
             logger.warning("Failed to write manifest for job_id=%s: %s", jid, e)
         result.phase2_run += 1
+
+    if result.auth_failures and not result.auth_error and not result.succeeded \
+            and result.auth_failures == result.failed:
+        # Fewer jobs than AUTH_FAILURE_LIMIT, every one of them on the login.
+        result.auth_error = last_auth_error
+    if result.auth_error:
+        logger.error(
+            "Claude can't authenticate (claude_auth): stopped after %s auth failure(s), "
+            "%s job(s) left for the next run.", result.auth_failures, result.auth_skipped,
+        )
 
     if llm.backend() == "claude":
         usage = claude_client.usage_snapshot()
