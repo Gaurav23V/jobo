@@ -195,8 +195,10 @@ PERMANENT = [
     ("stuck", "Fabrikam portal requires signup gated by an email OTP wall that has already been confirmed non-functional/undeliverable on a prior retry"),
     ("stuck", "Myrtleby's application form requires mandatory 10th/12th/Graduation percentage+year fields not present in candidate facts or resume"),
     ("stuck", "Company career-page form's Cloudflare Turnstile widget errors out (600010) and never issues a token"),
-    ("stuck", "Apply flow has no web form; \"Apply Now\" is a mailto:careers@quillonpub.com link only"),
 ]
+# Permanent only while email apply is off (GHO-67); otherwise the retry lets
+# the agent report it as `email_apply`.
+NO_WEB_FORM = ("stuck", "Apply flow has no web form; \"Apply Now\" is a mailto:careers@quillonpub.com link only")
 RETRYABLE = [
     ("stuck", "Reached max tool-call iterations while on the \"Application Questions\" step (step 3 of 5) of Plover's Workday application"),
     ("stuck", "ran out of step budget (80 model steps) mid-form, before submitting"),
@@ -219,6 +221,11 @@ def test_blockers():
     for status, detail in RETRYABLE:
         check(f"retryable: {detail[:60] or '<empty>'}...", blockers.permanent_reason(status, detail) is None,
               f"got {blockers.permanent_reason(status, detail)!r}")
+    with patch.dict(os.environ, {"JOBO_EMAIL_APPLY": "off"}):
+        check("no web form: permanent with email apply off", blockers.permanent_reason(*NO_WEB_FORM) is not None)
+    with patch.dict(os.environ, {"JOBO_EMAIL_APPLY": "send"}):
+        check("no web form: retryable with email apply on", blockers.permanent_reason(*NO_WEB_FORM) is None,
+              f"got {blockers.permanent_reason(*NO_WEB_FORM)!r}")
     check("stored status form parsed",
           blockers.permanent_reason_from_last_status("captcha_failed:hCaptcha grid") is not None)
     check("empty stored status is retryable", blockers.permanent_reason_from_last_status(None) is None)
