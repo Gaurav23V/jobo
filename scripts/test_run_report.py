@@ -426,6 +426,75 @@ def section_clustering(tmp: Path) -> None:
           and "3 more clusters" in text)
 
 
+def section_blocked(tmp: Path) -> None:
+    """Blocklisted jobs leave the queue and are not reported as stuck (GHO-80).
+
+    The apply query used to drop a blocked row without writing anything, so a
+    row the blocklist caught after it had been tried kept should_apply=1 and
+    outcome stuck: every run logged "BLOCKED EMPLOYER, skipping job N" for it
+    and the run report listed it as carried over.
+    """
+    print("\n6. blocklisted jobs are retired, not carried over (GHO-80)")
+    import os
+    from unittest.mock import patch
+
+    from module4 import query as m4q
+    from policy import employer_blocklist as bl
+
+    session = make_db(tmp / "blocked")
+    add_job(session, 20, outcome="stuck", status="stuck:MyCareer wants an existing account", company="Globex")
+    add_job(session, 21, outcome="stuck", status="stuck:hCaptcha image grid", company="Kestrel")
+    add_job(session, 22, outcome="stuck", status="stuck:Current Salary dropdown on www.jobboard.example",
+            company="Rowanby Consultancy")
+    add_job(session, 23, outcome="stuck", status="paused:workday:site paused", company="Globex India")
+    add_job(session, 24, outcome="not_attempted", company="Northwind")
+    for jid in (20, 21, 22, 23, 24):
+        session.get(JobModel, jid).module2_enriched_at = datetime(2026, 1, 1)
+    session.commit()
+
+    env = {"JOBO_BLOCKED_EMPLOYERS": "Globex"}
+    with patch.dict(os.environ, env), patch.object(bl, "blocked_domains", return_value=("jobboard.example",)):
+        lines = [
+            f"x - policy.employer_blocklist - INFO - [apply] BLOCKED EMPLOYER, skipping job {jid}: matched"
+            for jid in (20, 22)
+        ] + ["x - [li] module4.runner - INFO - - [li] job_id=21: DROPPED, not retryable (captcha)"]
+        log = write_log(tmp / "blocked" / "run_20260102_1000.log", "2026-01-02", lines)
+        report = rr.build_report(session, log, update_ledger=False)
+        check("blocklisted stuck rows are not carried over", report.carried_over == [21], str(report.carried_over))
+        check("blocklisted rows listed apart", report.blocked == [20, 22], str(report.blocked))
+        check("blocklisted rows not in any cluster",
+              not {20, 22} & {j for c in report.clusters for j in c.job_ids})
+        check("blocklisted rows counted as skipped_by_policy, not stuck",
+              report.outcomes == {"skipped_by_policy": 2, "stuck": 1}, str(report.outcomes))
+        text = rr.render_text(report)
+        check("text: one separate blocklisted line",
+              "Blocklisted (skipped by policy, not stuck): 2 jobs: 20, 22" in text
+              and "Carried over (stuck from an earlier run, not re-attempted here): 1 jobs: 21" in text)
+
+        queued = [j.id for j in m4q.list_jobs_to_apply(session)]
+        check("plain query still hides blocked rows", queued == [21, 24], str(queued))
+        check("plain query (plan, tests) writes nothing",
+              session.get(JobModel, 20).should_apply and session.get(JobModel, 20).module4_outcome == "stuck")
+
+        queued = [j.id for j in m4q.list_jobs_to_apply(session, retire_blocked=True)]
+        check("apply query with retire_blocked returns the same queue", queued == [21, 24], str(queued))
+        for jid in (20, 22, 23):
+            row = session.get(JobModel, jid)
+            session.refresh(row)
+            check(f"job {jid} retired: should_apply=0, skipped_by_policy, blocked_employer status",
+                  not row.should_apply and not row.applied and row.module4_outcome == "skipped_by_policy"
+                  and row.module4_last_status.startswith("blocked_employer:"), row.module4_last_status)
+        row = session.get(JobModel, 20)
+        check("retired row keeps its last attempt and attempt count",
+              "last attempt: stuck:MyCareer" in row.module4_last_status and row.module4_attempts == 1)
+        check("allowed rows untouched",
+              session.get(JobModel, 21).module4_outcome == "stuck" and session.get(JobModel, 21).should_apply)
+        with patch.object(bl, "log_blocked") as logged:
+            m4q.list_jobs_to_apply(session, retire_blocked=True)
+        check("next run does not log the retired rows again", not logged.called)
+    session.close()
+
+
 def section_ledger_cli(tmp: Path) -> None:
     """`jobo ledger set` through click, against a temp DB (GHO-59).
 
@@ -477,6 +546,8 @@ def main() -> int:
     section_blockers()
     with tempfile.TemporaryDirectory() as tmp:
         section_clustering(Path(tmp))
+        (Path(tmp) / "blocked").mkdir()
+        section_blocked(Path(tmp))
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} passed")
     if passed != len(results):

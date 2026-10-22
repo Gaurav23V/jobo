@@ -120,6 +120,32 @@ def record_failed_attempt(
     return job.module4_attempts
 
 
+def retire_blocked(
+    session: Session,
+    job: JobModel,
+    reason: str,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """The hard blocklist refuses this job: take it out of the apply queue.
+
+    Same terminal state as the runner's runtime blocked_employer outcome
+    (skipped_by_policy, should_apply=0, no attempt charged). Without it a
+    blocklisted row kept its old stuck:... status and should_apply=1, so every
+    run re-logged it and the run report counted it as carried over (GHO-80).
+    The previous status stays on the end, for the record.
+    """
+    prev = job.module4_last_status
+    job.module4_last_status = f"blocked_employer:{reason[:300]}" + (
+        f"; last attempt: {prev[:400]}" if prev else ""
+    )
+    job.should_apply = False
+    _stamp_outcome(job)
+    if not dry_run:
+        session.add(job)
+        session.commit()
+
+
 def drop_permanently(
     session: Session,
     job: JobModel,

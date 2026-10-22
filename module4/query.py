@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from db.models import JobModel
-from module4 import captcha_walls, email_apply
+from module4 import captcha_walls, email_apply, persist
 from policy import employer_blocklist, paused_sites
 
 
@@ -15,6 +15,7 @@ def list_jobs_to_apply(
     limit: int | None = None,
     force: bool = False,
     job_id: int | None = None,
+    retire_blocked: bool = False,
 ) -> list[JobModel]:
     """should_apply=true rows without a successful submission (unless force).
 
@@ -27,6 +28,10 @@ def list_jobs_to_apply(
     Blocked employers (policy.employer_blocklist) are removed unconditionally,
     including under --force and --job-id. The blocklist is a standing user
     preference, not a recoverable failure state.
+
+    retire_blocked: also write each blocked row's terminal state
+    (persist.retire_blocked) so it leaves the queue for good. The apply
+    callers pass it on a real run; read-only callers (plan, tests) do not.
     """
     q = (
         session.query(JobModel)
@@ -47,6 +52,13 @@ def list_jobs_to_apply(
     # Blocklist filtering happens BEFORE `limit` so a blocked job cannot eat a
     # slot in a capped run (JOBO_APPLY_MAX_JOBS).
     rows = q.all()
+    # Blocked first, so a blocked job parked on a paused site is retired too.
+    rows, blocked = employer_blocklist.partition(rows)
+    if blocked:
+        employer_blocklist.log_blocked(blocked, "apply")
+        if retire_blocked:
+            for job in blocked:
+                persist.retire_blocked(session, job, employer_blocklist.job_block_reason(job) or "blocklisted")
     # Jobs parked on a paused ATS wait until that site leaves
     # policy/paused_sites.PAUSED_SITES; an explicit --job-id or --force still
     # reaches them, for testing a fix.
@@ -60,9 +72,6 @@ def list_jobs_to_apply(
             # A parked email draft waits for draft mode to end (email_apply.py).
             and not (email_apply.is_parked(r.module4_last_status) and email_apply.mode() != "send")
         ]
-    allowed, blocked = employer_blocklist.partition(rows)
-    if blocked:
-        employer_blocklist.log_blocked(blocked, "apply")
     if limit:
-        allowed = allowed[:limit]
-    return allowed
+        rows = rows[:limit]
+    return rows

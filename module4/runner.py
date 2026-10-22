@@ -662,7 +662,8 @@ def run_module4(
 
         logger.info("Module 4 worker %s (%s): claiming jobs from the run queue.", worker.name, worker.role)
     else:
-        jobs = query.list_jobs_to_apply(session, limit=limit, force=force, job_id=job_id)
+        jobs = query.list_jobs_to_apply(session, limit=limit, force=force, job_id=job_id,
+                                        retire_blocked=not (dry_run or canary_only))
         cap = constants.max_jobs_per_run()
         if cap and not limit:
             jobs = jobs[:cap]

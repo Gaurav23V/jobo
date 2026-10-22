@@ -323,7 +323,8 @@ def run_parallel(
     if not dry_run and not hermes_preflight(result):
         return result
 
-    jobs = query.list_jobs_to_apply(session, limit=None if job_ids else limit, force=force, job_id=job_id)
+    jobs = query.list_jobs_to_apply(session, limit=None if job_ids else limit, force=force, job_id=job_id,
+                                    retire_blocked=not (dry_run or canary_only))
     if job_ids:
         wanted = set(job_ids)
         jobs = [j for j in jobs if j.id in wanted][: limit or None]

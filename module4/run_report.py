@@ -228,6 +228,8 @@ def scrub_sample(status: str | None, company: str | None) -> str:
 _APPLY_START = re.compile(r"=== apply starting ===")
 _JOB_ID = re.compile(r"job_id=(\d+)")
 _SKIPPING_JOB = re.compile(r"skipping job (\d+)")
+# policy/employer_blocklist.log_blocked; the runner's own gate says "Refusing, blocked".
+_BLOCKED_JOB = re.compile(r"BLOCKED EMPLOYER, skipping job (\d+)|\[(\d+)\] Refusing, blocked")
 _APPLYING = re.compile(r"\[(\d+)\] Applying\b")
 _ROUTED = re.compile(r"\[(\d+)\] Routed: \w+(?: (https?://\S+))?")
 
@@ -301,6 +303,7 @@ class RunLogJobs:
     touched: set[int] = field(default_factory=set)
     attempted: set[int] = field(default_factory=set)
     routes: dict[int, str] = field(default_factory=dict)  # job id -> ats host
+    blocked: set[int] = field(default_factory=set)  # refused by the hard blocklist
 
 
 def jobs_from_log(log_path: Path) -> RunLogJobs:
@@ -314,6 +317,10 @@ def jobs_from_log(log_path: Path) -> RunLogJobs:
                 continue
             for rx in (_JOB_ID, _SKIPPING_JOB):
                 out.touched.update(int(m) for m in rx.findall(line))
+            for m in _BLOCKED_JOB.finditer(line):
+                jid = int(m.group(1) or m.group(2))
+                out.blocked.add(jid)
+                out.touched.add(jid)
             m = _APPLYING.search(line)
             if m:
                 out.attempted.add(int(m.group(1)))
@@ -384,6 +391,9 @@ class RunReport:
     attempted_rate: dict
     clusters: list[Cluster]
     carried_over: list[int]
+    # Refused by the hard blocklist (policy, never a failure): kept out of the
+    # clusters and the carried-over list, whatever their stored outcome (GHO-80).
+    blocked: list[int] = field(default_factory=list)
     # Run-wide causes (stage:<name> @ pipeline), shown before the clusters.
     causes: list[Cluster] = field(default_factory=list)
 
@@ -424,8 +434,13 @@ def build_report(
     tried_submitted = sum(1 for r in tried_open if r.module4_outcome == "submitted")
     groups: dict[tuple[str, str], list[JobModel]] = {}
     carried: list[int] = []
+    blocked: list[int] = []
     for row in sorted(rows, key=lambda r: r.id):
         outcome = row.module4_outcome or "not_attempted"
+        if row.id in seen.blocked and row.id not in seen.attempted:
+            # A row the blocklist skipped before GHO-80 may still read "stuck".
+            outcome = "skipped_by_policy"
+            blocked.append(row.id)
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
         if outcome != "stuck":
             continue
@@ -484,6 +499,7 @@ def build_report(
         },
         clusters=clusters,
         carried_over=carried,
+        blocked=blocked,
         causes=causes,
     )
 
@@ -700,5 +716,10 @@ def render_text(report: RunReport, cap: int = TEXT_CLUSTER_CAP) -> str:
         lines.append(
             f"Carried over (stuck from an earlier run, not re-attempted here): {len(report.carried_over)} jobs: "
             + ", ".join(str(j) for j in report.carried_over)
+        )
+    if report.blocked:
+        lines.append(
+            f"Blocklisted (skipped by policy, not stuck): {len(report.blocked)} jobs: "
+            + ", ".join(str(j) for j in report.blocked)
         )
     return "\n".join(lines)
