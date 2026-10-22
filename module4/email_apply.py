@@ -42,7 +42,7 @@ from policy import personal
 logger = logging.getLogger(__name__)
 
 # The candidate has not yet seen a first email (G, GHO-67): drafts only.
-MODE = "draft"
+MODE = "send"
 MODES = ("send", "draft", "off")
 
 STATUS = "email_apply"
