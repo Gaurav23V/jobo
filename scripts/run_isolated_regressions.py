@@ -82,6 +82,7 @@ SUITES = (
     'test_email_apply',
     'test_workday_stuck_save',
     'test_claude_auth',
+    'test_greenhouse_embed',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',
@@ -97,6 +98,7 @@ SELF_ISOLATED = {
     'test_workday_source_prompt', 'test_workday_step_budget',
     'test_external_resume_gate',
     'test_workday_stuck_save',
+    'test_greenhouse_embed',
 }
 UNITTEST_SUITES = {'test_clicker', 'test_upload_stability', 'test_field_clear',
                    'test_workday_click_filter', 'test_workday_create_account'}

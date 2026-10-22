@@ -1,0 +1,75 @@
+<!doctype html>
+<!--
+Greenhouse application form replica for scripts/test_greenhouse_embed.py
+(GHO-71). Served at /embed/job_app, the path of Greenhouse's iframe embed.
+
+Upload, as measured on job-boards.greenhouse.io (2026-10-22): on `change` the
+app POSTs the file to its S3 bucket, REMOVES <input id=resume> and shows its
+own "<name> [Remove file]" chip. ?mode= picks how the app treats the change:
+  eager  reacts to the first change event (the normal case)
+  late   attaches its listener 1.5 s after load, so it misses the change
+         DOM.setFileInputFiles fires right away (models the night-run
+         Greenhouse forms that never saw that event: 2022, 2119, 516)
+  held   never reacts; the input keeps the file until submit
+
+Phone country, as on Greenhouse: options read "India +91", the control then
+shows only "+91".
+-->
+<html><head><title>Job Application</title></head>
+<body style="font-family:sans-serif;max-width:640px;margin:20px auto">
+<h2>Apply for this job</h2>
+<label for="first_name">First Name*</label> <input id="first_name" type="text" required><br>
+<div class="phone">
+  <label id="country-label" for="country">Country*</label>
+  <div class="select__control" style="border:1px solid #888;width:260px;position:relative">
+    <div class="select__value-container"><div class="select__single-value" id="country-value"></div>
+      <input id="country" role="combobox" aria-expanded="false" aria-labelledby="country-label" class="select__input" style="width:200px"></div>
+  </div>
+  <div id="country-menu" role="listbox" style="display:none;border:1px solid #ccc;width:260px"></div>
+</div>
+<fieldset id="resume-group"><legend>Resume/CV*</legend>
+  <div id="resume-slot"><input type="file" id="resume" class="visually-hidden" accept=".pdf,.doc,.docx,.txt,.rtf">
+  <button type="button" id="attach">Attach</button></div>
+</fieldset>
+<button type="button" id="submit">Submit application</button>
+<p id="errors"></p>
+<script>
+const mode = new URLSearchParams(location.search).get('mode') || 'eager';
+window.__changes = 0;
+window.__committed = '';
+const input = document.getElementById('resume');
+input.addEventListener('change', () => { window.__changes += 1; });
+const commit = () => {
+  const f = input.files && input.files[0];
+  if (!f || mode === 'held') return;
+  window.__committed = f.name;
+  // Greenhouse: take the file, drop the input, show a chip.
+  document.getElementById('resume-slot').innerHTML =
+    '<span class="chip">' + f.name + '</span> <button type="button">Remove file</button>';
+};
+if (mode === 'late') setTimeout(() => input.addEventListener('change', commit), 1500);
+else input.addEventListener('change', commit);
+
+const OPTIONS = ['British Indian Ocean Territory +246', 'India +91', 'United States +1'];
+const box = document.getElementById('country'), menu = document.getElementById('country-menu');
+const render = () => {
+  const q = box.value.trim().toLowerCase();
+  menu.innerHTML = '';
+  for (const o of OPTIONS.filter(o => !q || o.toLowerCase().includes(q))) {
+    const li = document.createElement('div');
+    li.setAttribute('role', 'option'); li.className = 'select__option'; li.textContent = o;
+    li.addEventListener('click', () => {
+      document.getElementById('country-value').textContent = o.split(' ').pop();
+      box.value = ''; menu.style.display = 'none'; box.setAttribute('aria-expanded', 'false');
+    });
+    menu.appendChild(li);
+  }
+  menu.style.display = 'block'; box.setAttribute('aria-expanded', 'true');
+};
+box.addEventListener('input', render);
+document.querySelector('.select__control').addEventListener('mousedown', render);
+document.getElementById('submit').addEventListener('click', () => {
+  document.getElementById('errors').textContent = window.__committed ? '' : 'Resume/CV is required.';
+});
+</script>
+</body></html>

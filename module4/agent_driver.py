@@ -934,11 +934,12 @@ def _resolve_upload(
                 _JOB.easy_apply_seen = True
                 logger.warning("[%s] Easy Apply upload failed: %s", job_id, ea.detail)
             return ea.as_agent_message()
+    promoted = _promote_embedded_form(cdp_url, job_id)
     try:
         result = uploader.upload_file(cdp_url, path, want=want, hint=hint)
     except Exception as e:
         logger.warning("[%s] Upload raised: %s", job_id, e)
-        return f"UPLOAD_FAILED: {e}"
+        return promoted + f"UPLOAD_FAILED: {e}"
 
     if result.ok:
         if want == "resume":
@@ -951,7 +952,25 @@ def _resolve_upload(
         elif want == "resume":
             _JOB.resume_upload_failure(result.detail)
         logger.warning("[%s] Upload failed: %s", job_id, result.detail)
-    return result.as_agent_message()
+    return promoted + result.as_agent_message()
+
+
+def _promote_embedded_form(cdp_url: str, job_id: int) -> str:
+    """Open an iframe-embedded ATS form in the tab (module4/embedded_forms.py).
+
+    Returns the note for the agent, ending in a blank line, or ''.
+    """
+    try:
+        from module4 import embedded_forms
+
+        note = embedded_forms.promote(cdp_url)
+    except Exception as e:  # pragma: no cover - promotion is best-effort
+        logger.warning("[%s] embedded form check raised: %s", job_id, e)
+        return ""
+    if note:
+        logger.info("[%s] Opened the embedded application form in the tab.", job_id)
+        return note + "\n\n"
+    return ""
 
 
 def _resolve_field(
@@ -1282,17 +1301,18 @@ def _resolve_fields_listing(*, cdp_url: str, job_id: int) -> str:
         return f"FIELDS_LISTED_FAILED: form filler unavailable ({e})."
 
     logger.info("[%s] Agent requested the numbered field list.", job_id)
+    promoted = _promote_embedded_form(cdp_url, job_id)
     try:
         result = form_filler.list_fields(cdp_url)
     except Exception as e:
         logger.warning("[%s] list_fields raised: %s", job_id, e)
-        return f"FIELDS_LISTED_FAILED: {e}"
+        return promoted + f"FIELDS_LISTED_FAILED: {e}"
     if result.ok:
         form_filler.remember_listing(cdp_url, result)
         logger.info("[%s] Listed %d field(s) for the agent.", job_id, len(result.fields))
     else:
         logger.warning("[%s] Field listing failed: %s", job_id, result.note[:100])
-    return result.as_agent_message()
+    return promoted + result.as_agent_message()
 
 
 def run_apply_agent(

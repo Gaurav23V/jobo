@@ -72,6 +72,13 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         # Parked behind an hCaptcha that every visitor meets (module4/captcha_walls.py):
         # nothing left to fix in code; going further is G's call (a solver service).
         ("captcha:wall_parked", "needs_g", r"\bcaptcha_wall\b"),
+        # The form sat in an iframe the agent's snapshot could not read. Above
+        # the personal rules: Stripe 2268 named the "voluntary disclosures" it
+        # never reached and was filed as personal:disclosures (needs_g).
+        # A captcha's own iframe (Lever's hCaptcha enclave) is a captcha case.
+        ("form:embedded_iframe", "fixable",
+         r"^(?!.*captcha).*?(?:(?:cross[- ]origin|embedded|greenhouse|ashby)[^.]{0,40}\biframe"
+         r"|\biframe[^.]{0,80}(?:field[- ]?lister|snapshot|need_fields|accessibility tree|cannot see|can t see))"),
         ("personal:id_or_dob", "needs_g",
          r"\bpan\b|aadhaa?r|date of birth|\bdob\b|national (?:id|identifier)|passport number"
          r"|social security|\bmarks\b|\bcgpa\b|\bgpa\b|percentage"),

@@ -340,7 +340,10 @@ _SET_FIELD_JS = r"""
   // So every success path settles first and re-reads, and reports honestly
   // if the value did not survive.
   const SETTLE_MS = 600;
-  const finish = async (readFn, expectedN) => {
+  // `pickedN`: the full text of the option we clicked, for widgets that show
+  // only part of it once chosen (Greenhouse's phone Country lists "India +91"
+  // and then displays "+91").
+  const finish = async (readFn, expectedN, pickedN) => {
     await sleep(SETTLE_MS);
     let after = '';
     try { after = (readFn() || '').toString(); } catch (e) {}
@@ -348,7 +351,8 @@ _SET_FIELD_JS = r"""
     const afterN = norm(after);
     out.ok = afterN !== '' && (afterN === expectedN ||
                                afterN.includes(expectedN) ||
-                               expectedN.includes(afterN));
+                               expectedN.includes(afterN) ||
+                               (!!pickedN && (' ' + pickedN + ' ').includes(' ' + afterN + ' ')));
     if (!out.ok) {
       out.reverted = true;
       out.note = 'the value did not survive the form re-rendering (field now ' +
@@ -965,6 +969,7 @@ __COLLECT__
       let best = null, bestS = 0;
       for (const o of opts) { const s = score(o); if (s > bestS) { bestS = s; best = o; } }
       if (best) {
+        const pickedN = norm(best.innerText || best.textContent || '');
         best.scrollIntoView({block: 'center'});
         await sleep(60);
         realClick(best);
@@ -1018,7 +1023,7 @@ __COLLECT__
           const boxText = box ? (box.innerText || '').trim() : '';
           const ph = (el.getAttribute('placeholder') || '').trim();
           return ph && boxText === ph ? '' : boxText;
-        }, wantN);
+        }, wantN, bestS >= 2 ? pickedN : '');
       }
       // Leave NO residue. We typed a query into this widget to make it search;
       // if nothing matched, that text is still sitting in the input. Greenhouse

@@ -1,0 +1,22 @@
+<!doctype html>
+<!--
+A company careers page that embeds its Greenhouse form in a cross-origin
+iframe, like stripe.com (2268) and pantheon.io (2107). Served from 127.0.0.1;
+the iframe comes from localhost on the same port, a different site, so
+Chromium puts it in its own process just as it does job-boards.greenhouse.io.
+-->
+<html><head><title>Careers - Backend Engineer</title></head>
+<body style="font-family:sans-serif">
+<h1>Backend Engineer</h1>
+<label for="locale">Language</label>
+<select id="locale"><option>English</option><option>Deutsch</option></select>
+<p>Apply below.</p>
+<div id="grnhse_app"></div>
+<script>
+const f = document.createElement('iframe');
+f.title = 'Greenhouse Job Board';
+f.width = 700; f.height = 600;
+f.src = 'http://localhost:' + location.port + '/embed/job_app?for=acme&token=8301253&mode=eager';
+document.getElementById('grnhse_app').appendChild(f);
+</script>
+</body></html>

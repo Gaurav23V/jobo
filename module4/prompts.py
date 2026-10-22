@@ -628,7 +628,12 @@ one, follow its note instead of exploring from scratch.
   searches every tab.
 - **Greenhouse (boards.greenhouse.io, job-boards.greenhouse.io)**: standard
   single-page form. Resume input is `input#resume`, hidden behind a styled
-  button. Use NEED_UPLOAD: resume.
+  button. Use NEED_UPLOAD: resume. If Submit then says "Resume/CV is
+  required." while the input holds the file, ask NEED_UPLOAD: resume ONCE
+  more (the pipeline re-sends the event Greenhouse missed); do not dispatch
+  events from the console. A careers page that embeds the form in an iframe
+  (`gh_jid=` in its URL) is opened in the tab for you at your first
+  NEED_UPLOAD or NEED_FIELDS; the reply says so.
 - **Ashby (jobs.ashbyhq.com)**: hidden file inputs - use NEED_UPLOAD. Ashby
   also runs an invisible reCAPTCHA that has flagged our submissions as spam.
   If you see "flagged as possible spam" after a genuine submit attempt, that

@@ -1071,6 +1071,11 @@ _APP_STATE_JS = r"""function(fname, errRe){
   return JSON.stringify({errs, shown});
 }"""
 _UPLOADISH_URL = re.compile(r"upload|file|resume|attach|parse|document|cv", re.I)
+# Direct-to-storage uploads carry none of those words: Greenhouse POSTs the file
+# straight to https://grnhse-prod-....s3.us-west-2.amazonaws.com/ on change.
+# Only a write to such a host counts (pages GET images from S3 all the time).
+_STORAGE_URL = re.compile(
+    r"\.s3[.-][\w.-]*amazonaws\.com|storage\.googleapis\.com|blob\.core\.windows\.net", re.I)
 # An _app_evidence line saying the site STORED the file: a 2xx POST/PUT to an
 # attachment/upload endpoint. Oracle's resume import (Trey 272, 1429) posts
 # .../recruitingCECandidateResumeParsers (a parse: not storage) and then
@@ -1105,7 +1110,10 @@ def _app_evidence(cdp: _Cdp, before: dict, filename: str, req_mark: set) -> tupl
     new_errs = [e for e in now["errs"] if e not in before["errs"]]
     bad.extend(f'page says "{e}"' for e in new_errs)
     for rid, rec in cdp.requests.items():
-        if rid in req_mark or not _UPLOADISH_URL.search(rec["url"]):
+        if rid in req_mark:
+            continue
+        if not (_UPLOADISH_URL.search(rec["url"]) or
+                (rec["method"] in ("POST", "PUT") and _STORAGE_URL.search(rec["url"]))):
             continue
         short = re.sub(r"\?.*$", "", rec["url"])[-60:]
         if rec["status"] is not None and rec["status"] >= 400:
@@ -1174,6 +1182,13 @@ _CHOOSER_CONTROLS_JS = r"""function(want, hint){
   found.sort((a, b) => b.score - a.score);
   window.__joboChooserCtl = found.map(f => f.el);
   return JSON.stringify(found.map(f => ({score: f.score, label: f.label})));
+}"""
+
+# Page-dispatched input + change on the file input, once (see _upload_dom).
+_RESEND_CHANGE_JS = r"""function(){
+  this.dispatchEvent(new Event('input', {bubbles: true}));
+  this.dispatchEvent(new Event('change', {bubbles: true}));
+  return String(this.files ? this.files.length : 0);
 }"""
 
 _CHOOSER_POINT_JS = r"""function(i){
@@ -1403,6 +1418,7 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
             before = _app_state(cdp, path.name)
             req_mark = set(cdp.requests)
             writes = 0
+            resent = False
             stable_since = None
             previous_node = None
             empty_since = None
@@ -1443,8 +1459,9 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
                                    "the site took the file and stored it as an attachment (the input was "
                                    "consumed, e.g. a profile import that moved on to the next step)")
                             return UploadResult(True,
-                                f"{path.name} attached to {selected.descriptor}; {how} ({writes} write(s); "
-                                f"site: {'; '.join(confirmed[:3])})" + (f"; {consent}" if consent else ""),
+                                f"{path.name} attached to {selected.descriptor}; {how} ({writes} write(s)"
+                                + ("; after a re-sent change event" if resent else "")
+                                + f"; site: {'; '.join(confirmed[:3])})" + (f"; {consent}" if consent else ""),
                                 selected.descriptor, descriptors, 0, selected.ws_url)
                     else:
                         chip_since = None
@@ -1494,11 +1511,30 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
                         if in_flight:
                             stable_since = now  # wait for the app's own upload to answer
                             last = f"site upload still in flight: {in_flight[0]}"
+                        elif not confirmed and not resent and now - stable_since >= UPLOAD_SETTLE_SEC:
+                            # The input holds our file and the app has shown no
+                            # sign of reacting. Greenhouse's form missed the
+                            # change event DOM.setFileInputFiles fires (2022,
+                            # 2119, 516 in the 2026-10-22 night run: no S3 POST,
+                            # no file chip, "Resume/CV is required." on Submit);
+                            # one page-dispatched change made 516's Submit go
+                            # through. Re-send it once, here only: an app that
+                            # reacted to the first event (an upload call or a
+                            # chip) never gets a second one, so nothing that
+                            # uploads on change uploads twice (see _attach).
+                            _call_on_node(cdp, current.backend_node_id, _RESEND_CHANGE_JS)
+                            resent = True
+                            stable_since = now
+                            last = "re-sent the change event; waiting for the site to react"
                         elif now - stable_since >= UPLOAD_SETTLE_SEC:
                             # The last operation before success is the exact live
                             # FileList read above, after a fresh scoped DOM walk,
                             # plus the app's own state read just now.
-                            proof = "; ".join(confirmed[:3]) or "no site-side upload call or file-name display seen (file held by the input until submit)"
+                            proof = "; ".join(confirmed[:3]) or (
+                                "no site-side upload call or file-name display seen, not even after the change "
+                                "event was re-sent (file held by the input until submit)")
+                            if resent and confirmed:
+                                proof = "reacted only to a re-sent change event: " + proof
                             revealed = _reveal_hidden_section(cdp, current.backend_node_id, path.name)
                             return UploadResult(True,
                                 f"{path.name} attached to {current.descriptor} (verified after settle; "
