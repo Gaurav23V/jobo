@@ -419,6 +419,38 @@ def test_runner_controls():
         session.close()
         os.unlink(db)
 
+    # GHO-76: a ZipRecruiter apply link that answers 500 on every load is a
+    # listing that is gone (job 1868, 2026-10-18 and 10-21 runs): closed.
+    session, db = make_session()
+    zr = "https://www.ziprecruiter.com/kn/AbCdEf0123"
+    zr_500 = ("ZipRecruiter apply link returns \"SOMETHING WENT WRONG / Internal Server Error\" consistently "
+              "on two attempts, no job content or apply control ever loads")
+    try:
+        add_job(session, 20, url=zr)
+        add_job(session, 21, url=zr, attempts=1, last_status=f"stuck:{zr_500}")
+        add_job(session, 22, url=zr)
+        outcomes = {
+            20: Outcome(status="stuck", detail=zr_500),
+            # One bad load and then a different failure is not a dead listing.
+            22: Outcome(status="stuck", detail="ZipRecruiter showed an Internal Server Error once; after a "
+                                               "reload the form loaded but the resume upload never registered"),
+        }
+        result, spawned = run_with(session, outcomes)
+        rows = {j.id: j for j in session.query(JobModel).all()}
+        check("ZipRecruiter persistent 500 -> closed, no attempt charged",
+              rows[20].module4_outcome == "closed" and rows[20].module4_closed_at is not None
+              and rows[20].should_apply is False and rows[20].module4_attempts == 0,
+              f"{rows[20].module4_outcome} attempts={rows[20].module4_attempts}")
+        check("stored ZipRecruiter 500 -> closed without an agent",
+              21 not in spawned and rows[21].module4_outcome == "closed", f"{rows[21].module4_outcome}")
+        check("one ZipRecruiter 500 then another failure stays a charged failure",
+              rows[22].module4_outcome != "closed" and rows[22].module4_attempts == 1,
+              f"{rows[22].module4_outcome} attempts={rows[22].module4_attempts}")
+        check("closed counter", result.closed == 2, str(result.closed))
+    finally:
+        session.close()
+        os.unlink(db)
+
     session, db = make_session()
     try:
         for jid in range(10, 16):

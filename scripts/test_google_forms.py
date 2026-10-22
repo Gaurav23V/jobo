@@ -58,8 +58,9 @@ REAL_DETAILS = {
 OTHER_DETAILS = [
     ("Microsoft's Eightfold careers site only offers OAuth sign-up (Microsoft, LinkedIn, Google, Facebook), no email/password option", True),
     ("Google Careers apply flow forces sign-in to a Google Account with no email/password ATS option; account creation requires phone/SMS verification", None),
-    # Retryable on main too (no "only offers google" phrase): unchanged.
-    ("Workable portal only offers Continue with Google sign-in, no email/password option", None),
+    # The OAuth-only wall in its button wording (job 2046's shape): permanent
+    # by the prompts.py policy since GHO-76, and still not a Google Form wall.
+    ("Workable portal only offers Continue with Google sign-in, no email/password option", True),
     ("Lever careers site is SSO-only via Google Workspace", True),
     ("Google Form fully filled but the Submit click did not register", None),
     ("ran out of step budget (80 model steps) mid-form, before submitting", None),

@@ -810,6 +810,15 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
         # dropped here without spawning an agent. 35% of all apply tokens to
         # 2026-09-26 went to repeat attempts at jobs that never got submitted.
         if (job.module4_attempts or 0) > 0 and not force:
+            last_status, _, last_detail = (job.module4_last_status or "").partition(":")
+            gone = blockers.dead_listing_reason(last_status, last_detail, job.job_url)
+            if gone:
+                persist.mark_closed(session, job, status="closed", detail=f"{gone}: {last_detail}",
+                                    dry_run=dry_run)
+                result.closed += 1
+                result.details.append(f"job_id={jid}: closed, not retried ({gone})")
+                logger.info("[%s] Not retrying, listing is gone: %s.", jid, gone)
+                continue
             perm = blockers.permanent_reason_from_last_status(job.module4_last_status)
             if perm:
                 persist.drop_permanently(session, job, dry_run=dry_run)
@@ -1239,6 +1248,15 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 result.already_applied += 1
                 logger.info("[%s] ALREADY APPLIED per the platform.", jid)
             result.details.append(f"job_id={jid}: {outcome.status} ({outcome.detail})")
+        elif blockers.dead_listing_reason(outcome.status, outcome.detail, job.job_url):
+            # Stuck on a listing the job board no longer serves: closed, like
+            # a dead posting the agent recognised itself.
+            gone = blockers.dead_listing_reason(outcome.status, outcome.detail, job.job_url)
+            persist.mark_closed(session, job, status="closed", detail=f"{gone}: {outcome.detail}",
+                                dry_run=dry_run)
+            result.closed += 1
+            result.details.append(f"job_id={jid}: closed ({gone})")
+            logger.info("[%s] CLOSED - %s.", jid, gone)
         elif outcome.status == "blocked_employer":
             # The agent found mid-application that the apply flow routes to a
             # blocklisted destination (Internshala's "Apply on company website"

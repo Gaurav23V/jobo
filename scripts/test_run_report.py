@@ -23,6 +23,7 @@ from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from db.models import Base, FailureLedgerModel, FailureLedgerRunModel, JobModel  # noqa: E402
+from module4 import blockers  # noqa: E402
 from module4 import run_report as rr  # noqa: E402
 
 results: list[tuple[str, bool, str]] = []
@@ -114,6 +115,32 @@ REAL_SHAPES = [
         ("captcha_failed:an hCaptcha \"drag the piece into place\" puzzle (in a cross-origin iframe on "
          "jobs.lever.co) stopped the submit", "Treyco"),
     ]),
+    # GHO-76 (run 2026-10-21 23:50): four reasons that were labelled wrong.
+    # The button's quoted wording used to fall through to signin:required.
+    ("signin:oauth_only", "needs_g", [
+        ("stuck:Northwind Experts only offers \"Continue with Google\" sign-in to apply, no email/password "
+         "option available", "Northwind Experts"),
+        ("stuck:Treyco's careers portal only has a 'Sign in with Microsoft' button; there is no way to "
+         "register with an email", "Treyco"),
+    ]),
+    # A required question none of whose choices is true: a stop, not a widget bug.
+    ("field:no_true_option", "needs_g", [
+        ("stuck:Required dropdown \"What is your current location? (hiring note)\" only offers United States "
+         "/ Canada; no option is true for an India-based candidate, and the form blocks submission without "
+         "it. All other required fields were completed, resume and cover letter attached.", "Northwind"),
+        ("stuck:Treyco's Greenhouse form has a required \"Where do you live?\" select with no true option "
+         "for the candidate (US states only); resume uploaded, Submit blocked", "Treyco"),
+    ]),
+    # The site's backend failing. The Dice reason says "not a captcha issue",
+    # which used to make it captcha:other.
+    ("site:server_error", "temporary", [
+        ("stuck:Northwind.com account registration (required to apply) fails every attempt with \"An API "
+         "error occurred while registering your account\" — a server-side error on Northwind's own "
+         "registration endpoint, not a validation or captcha issue, so there's no form path forward.",
+         "Northwind"),
+        ("stuck:job board apply link returns \"SOMETHING WENT WRONG / Internal Server Error\" consistently on "
+         "two attempts, no job content or apply control ever loads", "Treyco"),
+    ]),
 ]
 
 # Verbatim module4_last_status values from data/jobs.db (2026-10-18), chosen
@@ -171,6 +198,53 @@ def section_signatures() -> None:
     sample = rr.scrub_sample("stuck:Treyco's form for me@example.com broke", "Treyco")
     check("sample reason drops company and email",
           "Treyco" not in sample and "example.com" not in sample, sample)
+
+
+# GHO-76: the same four reasons, as module4/blockers.py sees them. OAuth-only
+# and no-true-option are permanent stops; a server error is not; a
+# ZipRecruiter link that 500s on every load is a closed listing.
+ZR_500 = ("ZipRecruiter apply link returns \"SOMETHING WENT WRONG / Internal Server Error\" consistently on "
+          "two attempts, no job content or apply control ever loads")
+
+
+def section_blockers() -> None:
+    print("1b. blockers: permanent stops and dead listings (GHO-76)")
+    permanent = [
+        "Northwind Experts only offers \"Continue with Google\" sign-in to apply, no email/password option "
+        "available",
+        "Required dropdown \"What is your current location? (hiring note)\" only offers United States / "
+        "Canada; no option is true for an India-based candidate, and the form blocks submission without it",
+    ]
+    retryable = [
+        "Northwind.com account registration (required to apply) fails every attempt with \"An API error "
+        "occurred while registering your account\", a server-side error, not a captcha issue",
+        ZR_500,
+        # A dropdown that would not keep a TRUE answer is a widget bug: retry.
+        "Required Location dropdown will not retain the selected option after blur",
+        # A login page offering Google among other ways is not OAuth-only.
+        "Sign-in page offers \"Continue with Google\" or email; the email OTP never arrived",
+    ]
+    for detail in permanent:
+        check(f"permanent: {detail[:55]}...", blockers.permanent_reason("stuck", detail) is not None)
+    for detail in retryable:
+        check(f"retryable: {detail[:55]}...", blockers.permanent_reason("stuck", detail) is None,
+              repr(blockers.permanent_reason("stuck", detail)))
+
+    zr = "https://www.ziprecruiter.com/kn/AbCdEf0123"
+    check("ZipRecruiter 500 on every load -> dead listing",
+          blockers.dead_listing_reason("stuck", ZR_500) is not None)
+    check("ZipRecruiter named only by the job URL still counts",
+          blockers.dead_listing_reason("stuck", "apply link: Internal Server Error on every reload", zr)
+          is not None)
+    # The 2026-10-22 14:50 retry of the same job worded the repeat this way.
+    check("a ZipRecruiter 500 'again on this retry' -> dead listing", blockers.dead_listing_reason(
+        "stuck", "ZipRecruiter apply link returns \"SOMETHING WENT WRONG / Internal Server Error\" again on "
+        "this retry, no job content or apply control ever loads") is not None)
+    check("a single ZipRecruiter 500 is not a dead listing", blockers.dead_listing_reason(
+        "stuck", "ZipRecruiter returned an Internal Server Error once, then the form loaded", zr) is None)
+    check("a persistent 500 off ZipRecruiter is not called closed", blockers.dead_listing_reason(
+        "stuck", "careers.northwind.com returns Internal Server Error consistently on two attempts") is None)
+    check("only stuck outcomes are reread", blockers.dead_listing_reason("submitted", ZR_500, zr) is None)
 
 
 # ------------------------------------------------------------ run fixtures
@@ -400,6 +474,7 @@ def section_ledger_cli(tmp: Path) -> None:
 
 def main() -> int:
     section_signatures()
+    section_blockers()
     with tempfile.TemporaryDirectory() as tmp:
         section_clustering(Path(tmp))
     passed = sum(1 for _, ok, _ in results if ok)

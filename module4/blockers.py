@@ -86,6 +86,10 @@ _DEMANDS = re.compile(r"requir|mandat|compulsory|cannot (?:be )?(?:fabricat|inve
 
 _EXTERNAL_IDENTITY_ONLY = re.compile(
     r"only (?:offers|supports|allows|accepts|has) (?:an? )?(?:oauth|google|sso|linkedin|microsoft|apple)|"
+    # The button's own wording, often quoted: 'only offers "Continue with
+    # Google" sign-in' (job 2046, 2026-10-21).
+    r"only (?:offers|supports|allows|accepts|has) (?:an? )?[\"'“‘]?"
+    r"(?:continue|sign[- ]?in|log[- ]?in|sign[- ]?up) with (?:google|linkedin|microsoft|apple)|"
     r"oauth[- ]only|sso[- ]only|apple id|trusted[- ]device|sms[- ]2fa|sms[- ]based 2fa|"
     r"requires (?:a )?google (?:account )?sign[- ]in",
     re.I,
@@ -146,6 +150,32 @@ _MISSING_FACT = re.compile(
     re.I | re.S,
 )
 
+# A required question none of whose choices is true for the candidate (a
+# location dropdown offering only US/Canada, job 2173): the agent must not pick
+# a false answer, and the next attempt meets the same list. The agent's own
+# words name it; a dropdown that merely would not keep a value is not this.
+_NO_TRUE_OPTION = re.compile(
+    r"requir.{0,200}?(?:no (?:option|answer|choice)s? (?:is|are|was|were) true|"
+    r"no true (?:option|answer|choice|match))",
+    re.I | re.S,
+)
+
+# A ZipRecruiter apply link that answers with a server error on every load in
+# the attempt is a listing ZipRecruiter no longer serves (job 1868: "Internal
+# Server Error" in the 2026-10-18 and 10-21 runs, the posting gone). Treated as
+# closed, not as a failure, so it neither burns retries nor counts as stuck.
+# One failed load is not enough: the agent must say it persisted.
+_ZIPRECRUITER = re.compile(r"ziprecruiter", re.I)
+_SERVER_ERROR = re.compile(r"internal server error|server error|\b5\d\d\b|something went wrong", re.I)
+_PERSISTED = re.compile(
+    r"consistently|repeated(?:ly)?|persistent(?:ly)?|every (?:attempt|time|load|try|reload)|"
+    r"(?:on|after) (?:both|each|all|two|three|\d+) (?:\w+ )?(?:attempts|tries|loads|reloads)|"
+    r"(?:two|three|\d+) (?:attempts|tries|loads|reloads|times)|"
+    # A later attempt seeing it again: "... again on this retry" (10-22).
+    r"again (?:on|in|after) (?:this|the|a|another) (?:retry|reload|attempt|run)",
+    re.I,
+)
+
 _NO_WEB_FORM = re.compile(r"mailto:|no web (?:application )?form|apply by email only", re.I)
 _BOT_WALL = re.compile(r"cloudflare|bot[- ]protection|bot[- ]fingerprint", re.I)
 
@@ -175,6 +205,8 @@ def permanent_reason(status: str | None, detail: str | None) -> str | None:
         return "form requires personal data that is not in the candidate facts"
     if _MISSING_FACT.search(d):
         return "form requires data that is not in the candidate facts"
+    if _NO_TRUE_OPTION.search(d):
+        return "a required question has no option that is true for the candidate"
     if _ORG_ONLY_FORM.search(d):
         # Seen only once signed in: the form is limited to the owner's
         # Workspace domain, so no account of ours can open it.
@@ -193,6 +225,18 @@ def permanent_reason(status: str | None, detail: str | None) -> str | None:
         return "no web application form"
     if _BOT_WALL.search(d):
         return "site blocks automated browsers"
+    return None
+
+
+def dead_listing_reason(status: str | None, detail: str | None, url: str | None = None) -> str | None:
+    """A short reason when a stuck attempt really met a listing that is gone."""
+    if (status or "").strip().lower() != "stuck":
+        return None
+    d = detail or ""
+    if not (_ZIPRECRUITER.search(d) or _ZIPRECRUITER.search(url or "")):
+        return None
+    if _SERVER_ERROR.search(d) and _PERSISTED.search(d):
+        return "ZipRecruiter apply link answers a server error on every load"
     return None
 
 

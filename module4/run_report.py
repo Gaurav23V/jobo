@@ -73,7 +73,8 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         ("signin:linkedin", "needs_g",
          r"linkedin (?:login|log in|sign[- ]?in|requires (?:a )?sign|job requires sign)|linkedin credentials"),
         ("signin:oauth_only", "needs_g",
-         r"oauth|google (?:account|form)|apple (?:id|account)|microsoft account|sign[- ]?in with google"
+         r"oauth|google (?:account|form)|apple (?:id|account)|microsoft account"
+         r"|(?:continue|sign[- ]?in|log ?in|sign[- ]?up) with (?:google|apple|microsoft)"
          r"|multi[- ]factor|\bmfa\b|trusted[- ]device|push approval"),
         ("account:create_noop", "fixable",
          r"(?:create account|creat\w* (?:the |a )?(?:\w+ )?account)[^.]{0,80}"
@@ -92,6 +93,12 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         ("signin:required", "needs_g",
          r"requires? (?:a )?(?:sign[- ]?in|log ?in|an account)|account sign[- ]?in|sign[- ]?in required|login wall"
          r"|sign[- ]?in to apply|\bb2c\b"),
+        # The site's own backend failing (Dice registration's "An API error
+        # occurred", a 500 page). Above the captcha rules: these reasons often
+        # add that it was "not a captcha issue".
+        ("site:server_error", "temporary",
+         r"internal server error|server[- ]side error|\bserver error\b|\bapi error\b"
+         r"|service unavailable|bad gateway"),
         ("captcha:turnstile", "fixable", r"turnstile"),
         ("captcha:hcaptcha", "fixable", r"hcaptcha"),
         ("captcha:recaptcha", "fixable", r"re-?captcha"),
@@ -101,6 +108,17 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         ("no_web_form", "fixable", r"mailto|no web (?:application )?form|apply (?:via|by) email|email only"),
         ("site:broken", "temporary",
          r"js exceptions?|javascript error|infinite (?:loading|spinner)|fails to load|unresponsive|blank page"),
+        # A required answer the site's own list or catalogue does not hold (the
+        # candidate's school on Ashby's school search, GHO-57; a location
+        # dropdown offering only US/Canada, GHO-76). Above the widget and
+        # upload rules: these reasons name the dropdown and go on to say the
+        # resume was uploaded fine.
+        ("field:no_true_option", "needs_g",
+         r"(?:school|college|university|institution|degree|discipline|major|field of study)\b.{0,80}?"
+         r"(?:no (?:\w+ ){0,2}(?:entry|entries|match|matches|option|options|result|results)\b"
+         r"|not (?:in|listed|offered|found)\b|does not (?:exist|list|contain|offer)"
+         r"|(?:has|have|offers?) no\b|no true\b)"
+         r"|no (?:option|answer|choice)s? (?:is|are|was|were) true|no true (?:option|answer|choice|match)"),
         ("widget:value_not_kept", "fixable",
          r"will not (?:commit|retain|register|accept|keep)|won t (?:commit|retain|select)"
          r"|not retain|invalid input|dropdown|combobox|autocomplete|radio"),
