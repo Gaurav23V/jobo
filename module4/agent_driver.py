@@ -1351,6 +1351,9 @@ def _run_apply_agent(
     # code is handed out, later rounds only accept mail newer than that one,
     # so a rejected code is never handed back again.
     otp_not_before = datetime.now(timezone.utc) - timedelta(seconds=OTP_CLOCK_SLACK_SEC)
+    # Newer mail is not enough on its own: job 2069 got "micro1" out of three
+    # separate resent mails. A value already handed out is never sent twice.
+    otp_codes_given: set[str] = set()
     prompt = full
     from module4 import browser_session
 
@@ -1660,7 +1663,20 @@ def _run_apply_agent(
                 otp_not_before = max(
                     otp_not_before, otp_seen["received_at"] + timedelta(seconds=1)
                 )
-            if code:
+            if code and code in otp_codes_given:
+                logger.warning(
+                    "[%s] Lookup returned a code this job was already given; not handing it over again.",
+                    job_id,
+                )
+                prompt = (
+                    "No new verification code could be retrieved: the newest mail "
+                    "carries the same code you were already given, which the page did "
+                    "not accept. Do not enter it again. If the page offers to resend "
+                    "the code, do that once and print NEED_OTP again. Otherwise print "
+                    "your STATUS/DETAIL/FIELDS_FILLED_JSON verdict now with the reason."
+                )
+            elif code:
+                otp_codes_given.add(code)
                 prompt = (
                     f"VERIFICATION_CODE: {code}\n\n"
                     "That is the code that was just emailed. Enter it in the "

@@ -233,6 +233,60 @@ CONTEXT_STRICT_CASES: list[tuple[str, str, str, str | None]] = [
         "OTP: 771034\nDo not share this code.\n",
         "771034",
     ),
+    (
+        # Job 2069, 2026-10-22 (micro1 / jobs.micro1.ai), the mail's real
+        # shape: the brand follows "verification code" in the subject, and
+        # "micro1" was handed to the agent three times.
+        "strict_micro1_brand_after_label",
+        "Your 6-digit verification code from micro1",
+        "Hello User,\n\nYour one-time verification code is: 482913.\n\n"
+        "Best wishes,\nmicro1 team\n",
+        "482913",
+    ),
+]
+
+# (label, from_header, subject, body, expected). The sender's own name is
+# never the code, even when the mail does not state the code's shape.
+SENDER_CASES: list[tuple[str, str, str, str, str | None]] = [
+    (
+        "sender_brand_not_a_code",
+        "micro1 <support@micro1.ai>",
+        "Your verification code from micro1",
+        "Hello User,\n\nYour one-time verification code is: 482913.\n",
+        "482913",
+    ),
+    (
+        "sender_brand_only_token_gives_none",
+        "micro1 <support@micro1.ai>",
+        "Your verification code from micro1",
+        "Hello User,\n\nYour code is shown in the image below.\n",
+        None,
+    ),
+    (
+        # Shape stated: a mixed token of the wrong shape is refused even
+        # without the sender.
+        "stated_shape_refuses_other_shapes",
+        "",
+        "Your 6-digit code from acme7",
+        "Thanks for signing up with acme7.\n",
+        None,
+    ),
+    (
+        # A password rule in the same mail is not the code's shape.
+        "password_rule_is_not_code_shape",
+        "Careers <no-reply@careers.example.com>",
+        "Verify your email",
+        "Your verification code is 553311.\n"
+        "Your password must be at least 8 characters long.\n",
+        "553311",
+    ),
+    (
+        "eight_character_code_shape",
+        "Greenhouse <no-reply@greenhouse.io>",
+        "Security code for your application",
+        "Copy this 8-character security code into your application:\n\nkRNWpqzs\n",
+        "kRNWpqzs",
+    ),
 ]
 
 # Real bodies that arrive INSTEAD of a code. These must NOT yield a code, and
@@ -312,6 +366,7 @@ def main() -> int:
     total = (
         len(CASES)
         + len(CONTEXT_STRICT_CASES)
+        + len(SENDER_CASES)
         + len(BLOCKER_CASES)
         + len(MAGIC_LINK_CASES)
     )
@@ -333,6 +388,17 @@ def main() -> int:
         else:
             failed.append((label, expected, got))
             print(f"  FAIL  {label:28s} expected {expected!r}, got {got!r}")
+
+    print("\n  -- sender's own name and the stated code shape (job 2069) --")
+    for label, sender, subject, body, expected in SENDER_CASES:
+        got = extract_code(body, subject=subject, require_context=True, sender=sender)
+        loose = extract_code(body, subject=subject, sender=sender)
+        if got == expected and loose == expected:
+            passed += 1
+            print(f"  PASS  {label:28s} -> {got!r}")
+        else:
+            failed.append((label, expected, (got, loose)))
+            print(f"  FAIL  {label:28s} expected {expected!r}, got strict={got!r} loose={loose!r}")
 
     print("\n  -- blocker detection (mail that arrives INSTEAD of a code) --")
     for label, subject, body, expect_blocker in BLOCKER_CASES:

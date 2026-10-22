@@ -376,7 +376,33 @@ def _strip_html(text: str) -> str:
     return re.sub(r"[ \t]+", " ", out)
 
 
-def extract_code(text: str, subject: str = "", require_context: bool = False) -> Optional[str]:
+# "Your 6-digit verification code", "enter the 8-character code": the mail
+# itself says what a code looks like, so nothing of another shape is one.
+# The shape must label a code: "at least 8 characters" about a password in
+# the same mail says nothing about the code.
+_DEMANDED_SHAPE_RE = re.compile(
+    r"(?<![a-z0-9])([4-8])[- ]?(digit|character|char)s?(?![a-z])"
+    r"[\s:]+(?:[a-z-]+\s+){0,2}(?:code|otp|pin|passcode)(?![a-z])",
+    re.IGNORECASE,
+)
+
+
+def _demanded_shape(haystack: str) -> Optional[tuple[int, bool]]:
+    """(length, digits_only) the mail says its code has, or None."""
+    m = _DEMANDED_SHAPE_RE.search(haystack)
+    if not m:
+        return None
+    return int(m.group(1)), m.group(2).lower() == "digit"
+
+
+def _sender_words(sender: str) -> set[str]:
+    """Words of a From header: display name, address local part, domain labels."""
+    return {w.lower() for w in re.findall(r"[A-Za-z0-9]+", sender or "")}
+
+
+def extract_code(
+    text: str, subject: str = "", require_context: bool = False, sender: str = ""
+) -> Optional[str]:
     """Pull the most probable verification code out of message text.
 
     Strategy, in priority order:
@@ -392,6 +418,15 @@ def extract_code(text: str, subject: str = "", require_context: bool = False) ->
     when it sits next to explicit verification wording. Used when searching
     WITHOUT a sender filter, where a loose shape-match could otherwise pick a
     number out of an unrelated email.
+
+    sender: the mail's From header. A word of the sender's own name or
+    address is never the code. Job 2069, 2026-10-22: micro1's subject "Your
+    6-digit verification code from micro1" put the brand right after
+    "verification code", and "micro1" (letters plus a digit, so not a "word")
+    was typed into the OTP field three times while the body said "Your
+    one-time verification code is: <6 digits>". Likewise, when the mail states
+    the code's shape ("6-digit", "8-character"), only a token of that shape
+    counts.
     """
     if not text and not subject:
         return None
@@ -406,6 +441,17 @@ def extract_code(text: str, subject: str = "", require_context: bool = False) ->
     text = _URL_RE.sub(" ", text)
     haystack = f"{subject}\n{text}"
     lowered = haystack.lower()
+    shape = _demanded_shape(haystack)
+    brand = _sender_words(sender)
+
+    def fits(token: str) -> bool:
+        """Not the sender's own name, and the shape the mail asks for (if any)."""
+        if token.lower() in brand:
+            return False
+        if shape is None:
+            return True
+        length, digits_only = shape
+        return len(token) == length and (token.isdigit() or not digits_only)
 
     # 1. Context-phrase adjacency.
     context_hits: list[str] = []
@@ -424,11 +470,12 @@ def extract_code(text: str, subject: str = "", require_context: bool = False) ->
                     neighbourhood = window[max(0, m.start() - 30) : m.end() + 30].lower()
                     if any(neg in neighbourhood for neg in _NEGATIVE_CONTEXT):
                         continue
-                    context_hits.append(token)
+                    if fits(token):
+                        context_hits.append(token)
                 # Same window, but for codes rendered as separated digit
                 # groups ("44 12 09", or one <td> per digit).
                 for joined in _spaced_candidates(window):
-                    if not any(neg in window.lower() for neg in _NEGATIVE_CONTEXT):
+                    if fits(joined) and not any(neg in window.lower() for neg in _NEGATIVE_CONTEXT):
                         context_hits.append(joined)
 
     subject_hits: list[str] = []
@@ -437,7 +484,7 @@ def extract_code(text: str, subject: str = "", require_context: bool = False) ->
     if subject and (not require_context or _SUBJECT_CODE_WORD_RE.search(subject.lower())):
         for m in _CODE_RE.finditer(subject):
             token = m.group(1)
-            if not _looks_like_year(token) and not _looks_like_word(token):
+            if not _looks_like_year(token) and not _looks_like_word(token) and fits(token):
                 subject_hits.append(token)
 
     # A letters-only hit is the weakest kind: a brand name in the subject
@@ -459,6 +506,7 @@ def extract_code(text: str, subject: str = "", require_context: bool = False) ->
         _CODE_RE.fullmatch(line)
         and not _looks_like_year(line)
         and not _looks_like_word(line)
+        and fits(line)
         for line in own_lines
     ):
         if context_hits or subject_hits:
@@ -475,7 +523,12 @@ def extract_code(text: str, subject: str = "", require_context: bool = False) ->
         if not stripped:
             continue
         m = _CODE_RE.fullmatch(stripped)
-        if m and not _looks_like_year(m.group(1)) and not _looks_like_word(m.group(1)):
+        if (
+            m
+            and not _looks_like_year(m.group(1))
+            and not _looks_like_word(m.group(1))
+            and fits(m.group(1))
+        ):
             return m.group(1)
 
     # 4. Fallback: prefer 6-digit, then any digit run.
@@ -485,7 +538,7 @@ def extract_code(text: str, subject: str = "", require_context: bool = False) ->
     candidates = []
     for m in _CODE_RE.finditer(text_nolinks):
         token = m.group(1)
-        if _looks_like_year(token) or _looks_like_word(token):
+        if _looks_like_year(token) or _looks_like_word(token) or not fits(token):
             continue
         # Screen the words immediately BEFORE the token. Without this the
         # Greenhouse footer address "18 West 18th Street ... New York, NY
@@ -1156,7 +1209,7 @@ def _search_pass(
         # beats a loose shape-match, because link mails carry URLs stuffed
         # with digits: Goodfit's callback UUID "01a06b02-d103-7754-9d5c" was
         # being returned as the code "7754" (observed 2026-09-05).
-        code = extract_code(body, subject=subject, require_context=True)
+        code = extract_code(body, subject=subject, require_context=True, sender=from_hdr)
         if not code:
             link = extract_magic_link(body, subject=subject)
             if link:
@@ -1181,7 +1234,7 @@ def _search_pass(
             if not require_context or (
                 loose_if_code_subject and _SUBJECT_CODE_WORD_RE.search(subject.lower())
             ):
-                code = extract_code(body, subject=subject, require_context=False)
+                code = extract_code(body, subject=subject, require_context=False, sender=from_hdr)
         if code:
             logger.info(
                 "otp_lookup: found code in message from %s (subject=%r)", from_hdr, subject[:60]

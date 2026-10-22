@@ -260,6 +260,32 @@ def main() -> int:
         )
     )
 
+    # 5b. Job 2069: three resent mails all yielded the same wrong value
+    # ("micro1"). A value already handed out must not be handed out again.
+    results.append(
+        run_case(
+            "otp_same_code_not_handed_twice",
+            [
+                "session_id: s5b\nNEED_OTP: micro1.ai\n",
+                "Page rejected the code; clicked resend.\nNEED_OTP: micro1.ai\n",
+                "STATUS: stuck\nDETAIL: Code rejected.\nFIELDS_FILLED_JSON: {}\n",
+            ],
+            expect_status="stuck",
+            checks=[
+                (
+                    "first round must carry the code",
+                    lambda h, o: "VERIFICATION_CODE: 654321" in h.calls[1]["prompt"],
+                ),
+                (
+                    "second round must not hand the same code over again",
+                    lambda h, o: "VERIFICATION_CODE" not in h.calls[2]["prompt"]
+                    and "654321" not in h.calls[2]["prompt"]
+                    and "same code" in h.calls[2]["prompt"],
+                ),
+            ],
+        )
+    )
+
     # 6. A verdict in the same output as a directive wins (no lookup at all).
     results.append(
         run_case(
