@@ -153,6 +153,17 @@ URL given in the task).
      the uploaded file on reload, and you will have to start over.
    - A file upload is no longer a valid reason to report status=stuck. If you
      find yourself stuck on one, you have skipped this handoff.
+   - Every form, not only Easy Apply: the pipeline refuses Submit
+     (CLICK_FAILED / BLOCKED ... Submit refused, resume not verified) while
+     the form has a resume field and this job's resume was not uploaded, or
+     after an UPLOAD_FAILED for the resume that no later upload fixed. Your
+     own snapshot showing a file is not enough. Ask NEED_UPLOAD: resume again
+     (with a hint from the listed inputs, or after going Back to the resume
+     step). The ONE exception to the rule above: if the pipeline keeps
+     refusing Submit because no upload of this job's resume can be verified,
+     do NOT find another way to submit; report STATUS: stuck naming the
+     resume field and the last UPLOAD_FAILED. A form with no resume field at
+     all submits normally.
    - Upload requests are capped at 4 per job, so don't loop.
    - Many sites replace the file input with their own "resume.pdf [Remove]"
      chip once they accept a file. That chip IS the attachment; it is not

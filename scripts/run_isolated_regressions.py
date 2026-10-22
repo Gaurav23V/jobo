@@ -78,6 +78,7 @@ SUITES = (
     'test_jobfound_stages', 'test_run_report', 'test_hcaptcha_walls',
     'test_emailed_mail_lookup',
     'test_workday_source_prompt', 'test_workday_step_budget',
+    'test_external_resume_gate',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',
@@ -91,6 +92,7 @@ SELF_ISOLATED = {
     'test_captcha_walls', 'test_easy_apply_resume', 'test_avature_work_history',
     'test_workday_click_filter', 'test_workday_create_account', 'test_avature_stale_numbers',
     'test_workday_source_prompt', 'test_workday_step_budget',
+    'test_external_resume_gate',
 }
 UNITTEST_SUITES = {'test_clicker', 'test_upload_stability', 'test_field_clear',
                    'test_workday_click_filter', 'test_workday_create_account'}

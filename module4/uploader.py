@@ -1059,10 +1059,28 @@ _APP_STATE_JS = r"""function(fname, errRe){
   const errs = (text.match(new RegExp('[^\n]*(?:' + errRe + ')[^\n]*', 'gi')) || []).map(s => s.trim().slice(0, 120));
   // Count where the app itself shows the file name (chip, link, label), not the input's value.
   const low = fname.toLowerCase();
-  const shown = text.toLowerCase().split(low).length - 1;
+  let shown = text.toLowerCase().split(low).length - 1;
+  // A chip that cuts a long name short (TurboHire 1635: "Alex_Example_Re..."
+  // for <First>_<Last>_Resume_1635_581287.pdf) shows a 12+ character prefix
+  // and an ellipsis. _app_evidence compares counts before and after the
+  // write, so an old chip that truncates the same way never counts.
+  for (const t of text.match(/[\w.\-]{12,}?(?:\.\.\.|…)/g) || []) {
+    const p = t.replace(/(?:\.\.\.|…)$/, '').toLowerCase();
+    if (p.length >= 12 && p !== low && low.startsWith(p)) shown += 1;
+  }
   return JSON.stringify({errs, shown});
 }"""
 _UPLOADISH_URL = re.compile(r"upload|file|resume|attach|parse|document|cv", re.I)
+# An _app_evidence line saying the site STORED the file: a 2xx POST/PUT to an
+# attachment/upload endpoint. Oracle's resume import (Trey 272, 1429) posts
+# .../recruitingCECandidateResumeParsers (a parse: not storage) and then
+# .../JobApplicationDrafts/<id>/child/attachments -> 201 (the attachment).
+_STORED_EVIDENCE = re.compile(r"^(?:POST|PUT) \S*(?:attach|upload)\S* -> HTTP 2\d\d$", re.I)
+_PARSE_ONLY_URL = re.compile(r"pars|autofill|import|extract", re.I)
+
+
+def _stored(confirmed: list[str]) -> list[str]:
+    return [c for c in confirmed if _STORED_EVIDENCE.search(c) and not _PARSE_ONLY_URL.search(c)]
 
 
 def _app_state(cdp: _Cdp, filename: str) -> dict:
@@ -1412,20 +1430,30 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
                     in_flight = [c for c in confirmed if c.endswith("(in flight)")]
                     _grant_inflight_grace(in_flight, inflight_grace)
                     shown = [c for c in confirmed if c.startswith("page now shows")]
+                    # Oracle's "Import your profile from resume" (Trey 272, GHO-70)
+                    # takes the file, stores it as the application's attachment
+                    # and moves on to the next step: input gone, name never shown.
+                    stored = _stored(confirmed)
                     now = time.monotonic()
-                    if shown and not in_flight:
+                    if (shown or stored) and not in_flight:
                         if chip_since is None:
                             chip_since = now
                         if now - chip_since >= UPLOAD_SETTLE_SEC:
+                            how = ("the site replaced the input with its own file display" if shown else
+                                   "the site took the file and stored it as an attachment (the input was "
+                                   "consumed, e.g. a profile import that moved on to the next step)")
                             return UploadResult(True,
-                                f"{path.name} attached to {selected.descriptor}; the site replaced the "
-                                f"input with its own file display ({writes} write(s); site: "
-                                f"{'; '.join(confirmed[:3])})" + (f"; {consent}" if consent else ""),
+                                f"{path.name} attached to {selected.descriptor}; {how} ({writes} write(s); "
+                                f"site: {'; '.join(confirmed[:3])})" + (f"; {consent}" if consent else ""),
                                 selected.descriptor, descriptors, 0, selected.ws_url)
                     else:
                         chip_since = None
+                    # Say what the site did answer: "parsed but stored nothing"
+                    # and "no call at all" need different fixes.
                     last = (f"site upload still in flight: {in_flight[0]}" if in_flight else
-                            "upload input disappeared after the write and the page does not show the file")
+                            "upload input disappeared after the write and the page does not show the file"
+                            + (f" (site: {'; '.join(confirmed[:3])}; no attachment stored)" if confirmed
+                               else " (no upload call from the site)"))
                 elif current is None:
                     stable_since = None
                     empty_since = None

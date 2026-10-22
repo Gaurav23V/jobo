@@ -15,6 +15,9 @@ Driver-side pieces:
     selection back. Never touches Next/Review/Submit.
   * submit_gate(): called before every NEED_CLICK that could submit. Refuses
     while the modal's selected resume is not this job's file.
+  * external_submit_gate(): the same NEED_CLICK check on every other site
+    (GHO-70): no submit while this job's resume is unverified and either its
+    upload failed or the form has a resume field.
 """
 
 from __future__ import annotations
@@ -288,3 +291,24 @@ def submit_gate(cdp_url: str, expected: str, verified: bool) -> tuple[bool, str,
             ok, reason = guard.judge(st, expected, verified)
             return ok, reason, True
     return True, "no LinkedIn Easy Apply modal is open", False
+
+
+def external_submit_gate(cdp_url: str, expected: str, state: dict) -> tuple[bool, str, bool]:
+    """(allowed, reason, page_shows_ours) before a click that may submit a
+    non-LinkedIn form. state: the driver's guard state (see resume_guard).
+
+    Fails CLOSED only when an upload of this job's resume already failed (the
+    page is the one thing that could still prove the file landed); otherwise
+    an unreadable page passes, as the plugin's veto does.
+    """
+    if int(state.get("resume_uploads_ok") or 0) > 0 or state.get("verified"):
+        return True, "this job's resume upload was verified", False
+    try:
+        states = [s for s in guard.inspect_external(cdp_url.rstrip("/"), None, expected) if s.get("external")]
+    except Exception as e:
+        if state.get("resume_upload_failed"):
+            return False, f"could not read the form to verify this job's resume ({e})", False
+        return True, f"could not read the form ({e})", False
+    ok, reason = guard.judge_external(states, expected, state)
+    shown = any(s.get("shown_ours") or s.get("ours_in_input") for s in states)
+    return ok, reason, shown

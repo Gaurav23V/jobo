@@ -473,14 +473,18 @@ def test_plugin_veto(cdp, srv, page, base, resume, tmp: Path):
 def test_other_sites(cdp, srv, page, base, resume):
     from module4 import upload_names
     want = upload_names.upload_name(JOB_ID, resume)
-    # Same modal markup but NOT on linkedin.com: the gate stays out of the way.
+    # Same modal markup but NOT on linkedin.com: the Easy Apply gate stays out
+    # of the way. The form has an "Upload resume" field and nothing was
+    # uploaded, so the external gate (GHO-70) refuses instead.
     srv.reset()
     page.goto(f"http://127.0.0.1:{srv.port}/jobs/view/1/?steps=1")
     page.open_modal()
     out, seen = drive(cdp, resume, ["NEED_CLICK: Submit application"])
-    check("non-LinkedIn site: the Easy Apply gate does not interfere with Submit",
-          len(srv.submits) == 1 and "Easy Apply Submit refused" not in (seen[1] if len(seen) > 1 else ""),
-          f"{srv.submits} {seen[1][:120] if len(seen) > 1 else ''}")
+    reply = seen[1] if len(seen) > 1 else ""
+    check("non-LinkedIn site: no Easy Apply refusal; the external resume gate holds Submit",
+          not srv.submits and "Easy Apply Submit refused" not in reply
+          and "Submit refused, resume not verified" in reply,
+          f"{srv.submits} {reply[:120]}")
     # Generic ATS input: the uniquely named copy is what lands in the input.
     page.goto(f"http://127.0.0.1:{srv.port}/ats")
     st = {}

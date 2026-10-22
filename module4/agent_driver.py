@@ -259,6 +259,8 @@ class ApplyOutcome:
 #   3. the jobo-browser plugin's resume_guard vetoes a direct browser_click /
 #      key / script submit in the same state (Hermes pre_tool_call).
 # Both 2 and 3 use hermes_plugin/jobo-browser/resume_guard.py's probe + rule.
+# GHO-70: 2 and 3 cover every other site too (judge_external): Trey 272 and
+# Margie 1635 were submitted after UPLOAD_FAILED with nothing verified.
 # Blank = "the submit button". "Apply"/"Send" too: harmless when no Easy
 # Apply modal is open (the gate then allows), and a label like "Apply" must
 # not slip past it while one is.
@@ -277,20 +279,39 @@ class _JobContext:
         self.easy_apply_seen = False
         self.easy_apply_verified = False
         self.upload_no_file_input = 0
+        # Last UPLOAD_FAILED of this job's resume while no upload of it has
+        # verified (GHO-70: Trey 272 and Margie 1635 were submitted after one).
+        self.resume_upload_failed = ""
+        # The external submit gate saw this job's file on the form itself /
+        # let a submit through because the form showed no resume field.
+        self.resume_seen_on_page = False
+        self.no_resume_field_at_submit = False
 
     def mark_verified(self) -> None:
         self.easy_apply_verified = True
         self.easy_apply_seen = True
         self._write()
 
+    def resume_upload_done(self) -> None:
+        self.resume_uploads_ok += 1
+        self._write()
+
+    def resume_upload_failure(self, detail: str) -> None:
+        self.resume_upload_failed = (detail or "upload failed")[:200]
+        self._write()
+
+    def guard_state(self) -> dict:
+        return {"job_id": self.job_id, "upload_name": self.upload_name,
+                "verified": self.easy_apply_verified,
+                "resume_uploads_ok": self.resume_uploads_ok,
+                "resume_upload_failed": "" if self.resume_uploads_ok else self.resume_upload_failed}
+
     def _write(self) -> None:
         if not self.state_file:
             return
         try:
             Path(self.state_file).parent.mkdir(parents=True, exist_ok=True)
-            Path(self.state_file).write_text(json.dumps({
-                "job_id": self.job_id, "upload_name": self.upload_name,
-                "verified": self.easy_apply_verified}))
+            Path(self.state_file).write_text(json.dumps(self.guard_state()))
         except OSError as e:  # the driver-side gate still holds the state
             logger.warning("[%s] Could not write the resume guard state: %s", self.job_id, e)
 
@@ -885,7 +906,7 @@ def _resolve_upload(
         if ea is not None:
             if ea.ok:
                 _JOB.resume_uploads_ok += 1
-                _JOB.mark_verified()
+                _JOB.mark_verified()  # writes the guard state too
                 logger.info("[%s] Upload SUCCEEDED (LinkedIn Easy Apply): %s", job_id, ea.detail)
             else:
                 _JOB.easy_apply_seen = True
@@ -899,11 +920,14 @@ def _resolve_upload(
 
     if result.ok:
         if want == "resume":
-            _JOB.resume_uploads_ok += 1
+            _JOB.resume_upload_done()
         logger.info("[%s] Upload SUCCEEDED: %s", job_id, result.detail)
     else:
         if NO_FILE_INPUT in (result.detail or ""):
+            # No slot here (yet): not a failed upload of the resume.
             _JOB.upload_no_file_input += 1
+        elif want == "resume":
+            _JOB.resume_upload_failure(result.detail)
         logger.warning("[%s] Upload failed: %s", job_id, result.detail)
     return result.as_agent_message()
 
@@ -1046,7 +1070,8 @@ def _enforce_account_password(
 
 def _easy_apply_submit_refusal(label: str, *, cdp_url: str, job_id: int) -> str:
     """Refusal message when this click could send an Easy Apply application
-    without THIS job's resume selected, else ''.
+    without THIS job's resume selected, or any other form without it verified
+    (_external_submit_refusal), else ''.
 
     Only submit-like requests are checked (a blank NEED_CLICK means "the
     submit button"). Consent checkboxes and navigation pass straight through.
@@ -1068,9 +1093,34 @@ def _easy_apply_submit_refusal(label: str, *, cdp_url: str, job_id: int) -> str:
             # kept the card from an earlier attempt: same name = same bytes).
             _JOB.mark_verified()
             logger.info("[%s] Easy Apply resume check passed: %s", job_id, reason)
-        return ""
+            return ""
+        return _external_submit_refusal(cdp_url=cdp_url, job_id=job_id)
     logger.warning("[%s] REFUSED Easy Apply submit: %s", job_id, reason)
     return "CLICK_FAILED: " + easy_apply.guard.refusal_message(reason, _JOB.upload_name).replace(
+        "BLOCKED by jobo: ", "", 1) + "\nNo click was sent."
+
+
+def _external_submit_refusal(*, cdp_url: str, job_id: int) -> str:
+    """Refusal message when a submit-like click on any other site would send
+    the application without THIS job's resume verified, else '' (GHO-70)."""
+    from module4 import easy_apply
+
+    try:
+        allowed, reason, shown = easy_apply.external_submit_gate(
+            cdp_url, _JOB.upload_name, _JOB.guard_state())
+    except Exception as e:  # pragma: no cover - external_submit_gate catches page errors
+        allowed, reason, shown = not _JOB.resume_upload_failed, f"resume check raised ({e})", False
+    if shown and not _JOB.resume_uploads_ok:
+        # The unique per-job name on the form is proof our upload landed.
+        _JOB.resume_seen_on_page = True
+        logger.info("[%s] Resume check passed: %s", job_id, reason)
+    if allowed:
+        if reason == "this form has no resume field":
+            _JOB.no_resume_field_at_submit = True
+            logger.info("[%s] Submit allowed without a resume upload: %s", job_id, reason)
+        return ""
+    logger.warning("[%s] REFUSED submit (resume not verified): %s", job_id, reason)
+    return "CLICK_FAILED: " + easy_apply.guard.refusal_message_external(reason, _JOB.upload_name).replace(
         "BLOCKED by jobo: ", "", 1) + "\nNo click was sent."
 
 
@@ -1279,9 +1329,13 @@ def _check_resume_rule(outcome: ApplyOutcome, job_id: int) -> ApplyOutcome:
     if _JOB.easy_apply_seen and not _JOB.easy_apply_verified:
         outcome.resume_rule_violation = (
             "LinkedIn Easy Apply submitted without this job's resume verified as the selected card")
-    elif _JOB.resume_uploads_ok == 0:
+    elif _JOB.resume_uploads_ok == 0 and not _JOB.resume_seen_on_page:
+        # Still flagged when the form showed no resume field at submit (an
+        # earlier step may have had one), but worded so a review can tell.
         outcome.resume_rule_violation = (
             "LinkedIn Easy Apply submitted with no upload of this job's resume" if said_easy_apply
+            else "submitted with no upload of this job's resume; the form showed no resume field at submit"
+            if _JOB.no_resume_field_at_submit and not _JOB.resume_upload_failed
             else "submitted with no verified upload of this job's resume")
     if outcome.resume_rule_violation:
         logger.error("[%s] RESUME RULE VIOLATION: %s (upload name %s).",
@@ -1604,9 +1658,9 @@ def _run_apply_agent(
                 continue
             click_rounds += 1
             prompt = _resolve_click(click_req.group(0), cdp_url=cdp_url, job_id=job_id)
-            # A refused Easy Apply submit sent no click; don't let the agent's
-            # fix-and-retry cycle eat the small click cap (bounded).
-            if "Easy Apply Submit refused" in prompt and resume_refusals < MAX_RESUME_REFUSALS:
+            # A refused submit (Easy Apply or any form) sent no click; don't
+            # let the agent's fix-and-retry cycle eat the small click cap (bounded).
+            if "Submit refused" in prompt and resume_refusals < MAX_RESUME_REFUSALS:
                 click_rounds -= 1
                 resume_refusals += 1
             if _ACCOUNT_SETUP_CLICK.search(click_req.group(0)):
