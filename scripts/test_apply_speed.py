@@ -158,7 +158,7 @@ def test_plugin_wiring():
         finally:
             plugin.click_scroller._run = orig_scroll
         check("plugin: the next response's click goes ahead", ok is None, str(ok))
-        nav = json.dumps({"success": True, "url": "https://jobs.lever.co/acme/1", "snapshot": LONG_FORM})
+        nav = json.dumps({"success": True, "url": "https://jobs.ashbyhq.com/acme/1", "snapshot": LONG_FORM})
         nav_out = json.loads(plugin._transform_tool_result("browser_navigate", {"url": "x"}, nav) or "{}")
         check("plugin: navigate results are unchanged (no extra snapshot, no note)",
               "jobo_page_after_action" not in nav_out and nav_out.get("snapshot", "").startswith(plugin.snapshot_filter.MARKER))

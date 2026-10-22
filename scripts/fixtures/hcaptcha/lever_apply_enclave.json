@@ -1,0 +1,6 @@
+{
+ "success": true,
+ "url": "https://jobs.lever.co/contoso/00000000-0000-4000-8000-000000000001/apply?lever-source=jobfound.org",
+ "title": "Contoso - Data Engineer, Data Platform",
+ "snapshot": "- link \"Contoso logo\" [ref=e1]\n- heading \"Data Engineer, Data Platform\" [level=2, ref=e2]\n- button \"ATTACH RESUME/CV\" [ref=e3]\n- textbox \"Full name✱\" [ref=e4]\n- textbox \"Email✱\" [ref=e5]\n- textbox \"Phone✱\" [ref=e6]\n- textbox \"Current location✱\" [ref=e7]\n- Iframe \"LinkedIn Embedded Content\" [ref=e18]\n- combobox \"Gender\" [ref=e11]\n- Iframe \"Widget containing checkbox for hCaptcha security challenge\" [ref=e14]\n- button \"SUBMIT APPLICATION\" [ref=e15]"
+}

@@ -291,7 +291,8 @@ class Module4Result:
     # Google Form behind Google sign-in: kept in the queue, no attempt
     # charged, skipped without an agent until the browser is signed in.
     google_signin_parked: int = 0
-    # hCaptcha on an Oracle Cloud / iCIMS sign-in gate (module4/captcha_walls.py):
+    # hCaptcha wall on an Oracle Cloud / iCIMS sign-in gate or a Paycom /
+    # Lever site (module4/captcha_walls.py):
     # kept in the queue, no attempt charged, skipped by later runs.
     captcha_parked: int = 0
     # Mailto-only postings (module4/email_apply.py): applications sent by
@@ -908,12 +909,13 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             continue
 
         # Same for a job_url on a host where another job is parked behind an
-        # hCaptcha sign-in wall (GHO-54: it meets the same wall).
+        # hCaptcha sign-in wall (GHO-54: it meets the same wall), or on a
+        # site-wall host that challenges every visitor (GHO-73: Paycom, Lever).
         wall_host = captcha_walls.walled_host_for_url(job.job_url, walled)
         if wall_host and not force:
             persist.mark_status(
                 session, job,
-                captcha_walls.status_for(wall_host, "another job on this host is parked behind its hCaptcha sign-in wall"),
+                captcha_walls.status_for(wall_host, captcha_walls.pre_park_detail(wall_host)),
                 dry_run=dry_run,
             )
             result.captcha_parked += 1
@@ -1006,7 +1008,22 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 result.details.append(f"job_id={jid}: closed when routed ({route.reason})")
                 continue
             result.attempted -= 1
-            if route.kind == linkedin_router.EXTERNAL and google_forms.find_form_url(route.apply_url) is None:
+            site_wall = (
+                captcha_walls.site_wall_host_for_url(route.apply_url)
+                if route.kind == linkedin_router.EXTERNAL and not force else None
+            )
+            if site_wall:
+                # Applies on a site that challenges every visitor (GHO-73):
+                # park it here instead of handing it to a form agent.
+                persist.mark_status(
+                    session, job,
+                    captcha_walls.status_for(site_wall, captcha_walls.pre_park_detail(site_wall)),
+                    dry_run=dry_run,
+                )
+                result.captcha_parked += 1
+                result.details.append(f"job_id={jid}: PARKED when routed, hCaptcha wall on {site_wall}")
+                logger.info("[%s] Parked when routed (no attempt charged): hCaptcha wall on %s.", jid, site_wall)
+            elif route.kind == linkedin_router.EXTERNAL and google_forms.find_form_url(route.apply_url) is None:
                 worker.hand_off(jid, "form", route.apply_url, f"external: {route.reason}")
                 result.routed_form += 1
             else:

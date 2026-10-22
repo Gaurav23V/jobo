@@ -11,15 +11,28 @@ reputation gets the puzzle. The agent has never solved one (Oracle: 4 jobs, 4
 walls, 0 submissions ever), and each attempt spent 15-17 model steps finding
 that out.
 
-Lever and other forms load the same invisible widget but challenge only some
-visitors (45 Lever applications went through), so this park is limited to the
-gate families below; a challenge elsewhere stays an ordinary captcha_failed.
+Measured 2026-10-22 (GHO-73): Paycom (www.paycomonline.net) and Lever
+(jobs.lever.co, jobs.eu.lever.co) are SITE walls. Executing their own hCaptcha
+sitekey in two fresh scratch profiles gave an image or drag puzzle at once on
+every page tried (2 Paycom tenants, 3 Lever postings, US and EU). Lever used to
+pass some visitors (750 and 920 went through on a retry in September), but it
+now loads hCaptcha's enclave mode (secure-api.js): a page-sized iframe that
+covers Submit, with the challenge nested inside it. Since 4 Oct every Lever
+attempt ended captcha_failed (1496, 1662, 1739, 2134; 2134 spent 72 steps
+clicking Submit). Paycom's challenge frame is hidden until shown and never
+reaches the accessibility snapshot (2197 spent 33 steps). The plugin cannot
+see either challenge, so on these hosts the job is parked on arrival.
+
+A challenge on any other host stays an ordinary captcha_failed.
 
 How a job gets here:
   * in a run, hermes_plugin/jobo-browser/captcha_guard.py sees the challenge on
-    one of these hosts and tells the agent to end with STATUS: captcha_wall;
-  * before a run, a job whose job_url host already parked another job is
-    parked without an agent (walled_job_hosts).
+    a gate host (or the agent reaches a site-wall host) and tells the agent to
+    end with STATUS: captcha_wall;
+  * before a run, a job whose job_url is on a site-wall host, or on a host that
+    already parked another job, is parked without an agent
+    (walled_host_for_url); so is a LinkedIn job the parallel router finds
+    applying on a site-wall host.
 
 A parked job keeps should_apply and its attempts; runs skip it. It needs a
 policy call from G to go further (no captcha-solving service without
@@ -31,9 +44,10 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 
-# Keep in sync with GATE_HOST_SUFFIXES in hermes_plugin/jobo-browser/captcha_guard.py
-# (the plugin cannot import module4); scripts/test_hcaptcha_walls.py checks it.
-GATE_HOST_SUFFIXES: tuple[str, ...] = ("oraclecloud.com", "icims.com")
+# Keep both in sync with hermes_plugin/jobo-browser/captcha_guard.py (the
+# plugin cannot import module4); scripts/test_hcaptcha_walls.py checks it.
+SITE_WALL_HOST_SUFFIXES: tuple[str, ...] = ("paycomonline.net", "lever.co")
+GATE_HOST_SUFFIXES: tuple[str, ...] = ("oraclecloud.com", "icims.com") + SITE_WALL_HOST_SUFFIXES
 
 STATUS_PREFIX = "captcha_wall:"
 
@@ -47,9 +61,23 @@ def host_of(url: str | None) -> str:
         return ""
 
 
-def is_gate_host(host: str | None) -> bool:
+def _matches(host: str | None, suffixes: tuple[str, ...]) -> bool:
     h = (host or "").lower().rstrip(".")
-    return any(h == s or h.endswith("." + s) for s in GATE_HOST_SUFFIXES)
+    return any(h == s or h.endswith("." + s) for s in suffixes)
+
+
+def is_gate_host(host: str | None) -> bool:
+    return _matches(host, GATE_HOST_SUFFIXES)
+
+
+def is_site_wall_host(host: str | None) -> bool:
+    return _matches(host, SITE_WALL_HOST_SUFFIXES)
+
+
+def site_wall_host_for_url(url: str | None) -> str | None:
+    """The host of `url` if it is a site wall (any url, a routed apply link too)."""
+    h = host_of(url)
+    return h if is_site_wall_host(h) else None
 
 
 def gate_host_in_text(text: str | None) -> str | None:
@@ -84,4 +112,11 @@ def walled_job_hosts(rows) -> set[str]:
 
 def walled_host_for_url(url: str | None, walled: set[str]) -> str | None:
     h = own_host(url)
-    return h if h and h in walled else None
+    return h if h and (h in walled or is_site_wall_host(h)) else None
+
+
+def pre_park_detail(host: str) -> str:
+    """Why a job on `host` was parked before any agent ran."""
+    if is_site_wall_host(host):
+        return f"hCaptcha challenges every visitor at {host} before the application goes through"
+    return "another job on this host is parked behind its hCaptcha sign-in wall"

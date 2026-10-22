@@ -1,0 +1,34 @@
+{
+ "success": true,
+ "snapshot": "- generic [ref=e1] clickable [onclick]\n- button \"menu\" [ref=e3]\n- heading \"Backend Software Engineer I/II (10001)\" [level=1, ref=e4]\n- heading \"Overview\" [level=2, ref=e5]\n- button \"Apply\" [ref=e6]\n- heading \"Backend Software Engineer I\" [level=2, ref=e7]\n- link \"Contoso Research\" [ref=e15]\n- heading \"Qualifications\" [level=2, ref=e8]\n- link \"Terms of Use | \" [ref=e13]\n- link \"Privacy Policy |\" [ref=e14]\n- button [ref=e2]\n- dialog\n- button \"Cancel\" [ref=e19]\n- heading \"Getting You Started\" [level=2, ref=e16]\n- link \"Sign In\" [ref=e17]\n- link \"Create Account\" [ref=e18]\n- button \"Cancel\" [ref=e20]\n- button \"Continue To Application\" [ref=e21]",
+ "element_count": 21,
+ "pending_dialogs": [],
+ "frame_tree": {
+  "top": {
+   "frame_id": "TOP0",
+   "url": "https://www.paycomonline.net/v4/ats/web.php/portal/0000000000000000000000000000C0DE/jobs/100001",
+   "origin": "https://www.paycomonline.net",
+   "is_oopif": false,
+   "session_id": "S0"
+  },
+  "children": [
+   {
+    "frame_id": "HC1",
+    "url": "",
+    "origin": "",
+    "is_oopif": true,
+    "session_id": "S1",
+    "parent_frame_id": "TOP0"
+   },
+   {
+    "frame_id": "HC2",
+    "url": "",
+    "origin": "",
+    "is_oopif": true,
+    "session_id": "S2",
+    "parent_frame_id": "TOP0"
+   }
+  ],
+  "truncated": false
+ }
+}

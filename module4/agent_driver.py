@@ -70,9 +70,10 @@ VALID_STATUSES = {
     # Not a failure either: no attempt is charged and the job comes back once
     # the site is un-paused.
     "paused_site",
-    # An hCaptcha challenge gates the email/sign-in step of an Oracle Cloud or
-    # iCIMS site for every visitor (module4/captcha_walls.py). Only the
-    # plugin's notice asks for it; the job is parked, no attempt charged.
+    # An hCaptcha challenge meets every visitor: on the email/sign-in step of
+    # an Oracle Cloud or iCIMS site, or anywhere on a Paycom / Lever site
+    # (module4/captcha_walls.py). Only the plugin's notice asks for it; the
+    # job is parked, no attempt charged.
     "captcha_wall",
     # LinkedIn shows the shared apply browser as signed out. A PIPELINE
     # problem: the runner stops the stage and charges no attempt
@@ -493,7 +494,7 @@ def parse_verdict(text: str) -> ApplyOutcome:
         # way in. Truncate at the point of display only.
         detail = matches[-1].group(1).strip()
     if status == "captcha_wall" and not captcha_walls.gate_host_in_text(detail):
-        # Parking is only for the Oracle Cloud / iCIMS gates; anywhere else it
+        # Parking is only for the gate hosts in captcha_walls; anywhere else it
         # is the captcha_failed it always was (and must not wall that host).
         status = "captcha_failed"
     matches = list(EMAIL_APPLY_RE.finditer(text))

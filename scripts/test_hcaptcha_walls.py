@@ -8,6 +8,13 @@ met the same challenge on both sites, so it is the site, not our browser
 (module4/captcha_walls.py). The fixtures in scripts/fixtures/hcaptcha/ are the
 real page snapshots of those two runs with names, hosts and the email replaced.
 
+GHO-73, 2026-10-22: 2197 (Paycom) and 2134 (Lever) met hCaptcha challenges the
+snapshot never shows (Paycom's hidden challenge frame, Lever's page-sized
+enclave iframe) and spent 33 and 72 steps. Both sites challenged every fresh
+scratch profile, so they are site walls: parked on arrival, or before any
+agent. paycom_guest_dialog.json and lever_apply_enclave.json have the shape of
+those runs' results with employer names and ids replaced.
+
 Offline: temporary SQLite DB, no browser, no model calls.
 
     uv run python scripts/test_hcaptcha_walls.py
@@ -37,6 +44,9 @@ FIXTURES = Path(__file__).with_name("fixtures") / "hcaptcha"
 PLUGIN_DIR = REPO / "hermes_plugin" / "jobo-browser"
 ORACLE = "contoso.fa.oraclecloud.com"
 ICIMS = "careers-fabrikam.icims.com"
+PAYCOM = "www.paycomonline.net"
+LEVER = "jobs.lever.co"
+OTHER = "boards.greenhouse.io"  # any host outside captcha_walls
 
 PASS = 0
 FAIL = 0
@@ -90,13 +100,15 @@ def test_guard():
     check("challenge gone: vision allowed again", g.check_tool_call("browser_vision", {"question": "x"}) is None)
 
     g.reset_state()
-    lever = dict(oracle, url="https://jobs.lever.co/example/123/apply")
-    seen = g.observe("browser_navigate", json.dumps(lever))
-    check("same challenge on a Lever form: stop now, but as captcha_failed (Lever challenges only some visitors)",
+    other = dict(oracle, url=f"https://{OTHER}/example/jobs/123")
+    seen = g.observe("browser_navigate", json.dumps(other))
+    check("same challenge on a non-gate form: stop now, but as captcha_failed",
           bool(seen) and "STATUS: captcha_failed" in seen[1] and "captcha_wall" not in seen[1], seen and seen[1])
 
     check("plugin and module4 agree on the gate hosts",
           tuple(g.GATE_HOST_SUFFIXES) == tuple(captcha_walls.GATE_HOST_SUFFIXES))
+    check("plugin and module4 agree on the site-wall hosts",
+          tuple(g.SITE_WALL_HOST_SUFFIXES) == tuple(captcha_walls.SITE_WALL_HOST_SUFFIXES))
 
     print("\n[2] plugin: the notice survives the snapshot filter")
     plugin = _load("jobo_hcaptcha_plugin_test", PLUGIN_DIR / "__init__.py")
@@ -113,16 +125,16 @@ def test_verdict_and_rules():
         f"STATUS: captcha_wall\nDETAIL: hCaptcha challenge on the email/sign-in step at {ORACLE}\nFIELDS_FILLED_JSON: {{}}"
     )
     check("captcha_wall is a valid agent status", v.status == "captcha_wall", v.status)
-    lever = agent_driver.parse_verdict("STATUS: captcha_wall\nDETAIL: hCaptcha challenge at jobs.lever.co\n")
-    check("captcha_wall on a non-gate host is read as captcha_failed", lever.status == "captcha_failed", lever.status)
+    other = agent_driver.parse_verdict(f"STATUS: captcha_wall\nDETAIL: hCaptcha challenge at {OTHER}\n")
+    check("captcha_wall on a non-gate host is read as captcha_failed", other.status == "captcha_failed", other.status)
     check("a non-gate status never counts as parked",
-          not captcha_walls.is_parked("captcha_wall:hCaptcha challenge on jobs.lever.co"))
+          not captcha_walls.is_parked(f"captcha_wall:hCaptcha challenge on {OTHER}"))
     parked = captcha_walls.status_for(ORACLE, v.detail)
     check("parked status is recognised", captcha_walls.is_parked(parked))
     check("a parked status is never read back as a permanent drop",
           blockers.permanent_reason_from_last_status(parked) is None)
     check("captcha_wall naming no gate host is dropped like captcha_failed",
-          blockers.permanent_reason("captcha_wall", "hCaptcha at jobs.lever.co") is not None)
+          blockers.permanent_reason("captcha_wall", f"hCaptcha at {OTHER}") is not None)
     check("1878's real status is still a captcha:hcaptcha failure",
           run_report.signature_for("captcha_failed:Oracle Cloud application gated by hCaptcha image challenge") == "captcha:hcaptcha")
     sig = run_report.signature_for(parked)
@@ -219,18 +231,129 @@ def test_runner():
 
     print("\n[7] runner: captcha_wall with no gate host is an ordinary captcha drop")
     s3 = _session()
-    j6 = _job(s3, 1936, "https://jobs.lever.co/example/1")
-    _run(s3, agent_driver.ApplyOutcome("captcha_wall", "hCaptcha challenge on jobs.lever.co"))
+    j6 = _job(s3, 1936, f"https://{OTHER}/example/jobs/1")
+    _run(s3, agent_driver.ApplyOutcome("captcha_wall", f"hCaptcha challenge on {OTHER}"))
     s3.refresh(j6)
     check("charged and dropped, not parked",
           j6.module4_attempts == 1 and j6.should_apply is False and not captcha_walls.is_parked(j6.module4_last_status),
           f"{j6.module4_attempts} {j6.should_apply} {j6.module4_last_status}")
 
 
+def test_site_wall_guard():
+    print("\n[8] GHO-73: Paycom and Lever end the run on arrival (their challenge never shows in a snapshot)")
+    g = _load("jobo_hcaptcha_site_guard_test", PLUGIN_DIR / "captcha_guard.py")
+    g.reset_state()
+    paycom = _fixture("paycom_guest_dialog")
+    check("2197's Paycom page: the snapshot holds no hCaptcha line at all",
+          "captcha" not in paycom["snapshot"].lower() and g.classify(paycom) is None)
+    seen = g.observe("browser_snapshot", json.dumps(paycom))
+    check("Paycom: host from the frame tree, ends as captcha_wall",
+          bool(seen) and seen[0] == "hcaptcha_site" and "STATUS: captcha_wall" in seen[1]
+          and f"hCaptcha wall at {PAYCOM}" in seen[1], seen and seen[1])
+    check("the notice leaves a closed posting to be reported as closed", bool(seen) and "STATUS: closed" in seen[1])
+
+    g.reset_state()
+    lever = _fixture("lever_apply_enclave")
+    check("2134's Lever form: only the enclave iframe, no visible challenge", g.classify(lever) is None)
+    seen = g.observe("browser_navigate", json.dumps(lever))
+    check("Lever: ends as captcha_wall before any field is filled",
+          bool(seen) and "STATUS: captcha_wall" in seen[1] and f"hCaptcha wall at {LEVER}" in seen[1], seen and seen[1])
+    eu = dict(lever, url="https://jobs.eu.lever.co/contoso/00000000-0000-4000-8000-000000000002/apply")
+    seen = g.observe("browser_navigate", json.dumps(eu))
+    check("EU Lever too", bool(seen) and "hCaptcha wall at jobs.eu.lever.co" in seen[1], seen and seen[1])
+    v = agent_driver.parse_verdict(
+        "STATUS: captcha_wall\nDETAIL: hCaptcha wall at jobs.eu.lever.co\nFIELDS_FILLED_JSON: {}")
+    check("the verdict the notice asks for is a park, not a drop",
+          v.status == "captcha_wall" and blockers.permanent_reason(v.status, v.detail) is None, v.status)
+
+    g.reset_state()
+    listing = {"url": "https://www.linkedin.com/jobs/view/2134/", "snapshot": '- button "Apply" [ref=e1]'}
+    check("a LinkedIn listing is no wall", g.observe("browser_navigate", json.dumps(listing)) is None)
+    other = dict(lever, url=f"https://{OTHER}/contoso/jobs/1")
+    check("the same form on a non-wall host is no wall", g.observe("browser_navigate", json.dumps(other)) is None)
+    check("Lever hosts only, not look-alikes",
+          not g.is_site_wall_host("cleverco.example.com") and not captcha_walls.is_site_wall_host("notlever.co.example"))
+
+    plugin = _load("jobo_hcaptcha_site_plugin_test", PLUGIN_DIR / "__init__.py")
+    plugin.captcha_guard.reset_state()
+    out = json.loads(plugin._transform_tool_result("browser_navigate", {}, json.dumps(lever)))
+    check("notice survives the snapshot filter",
+          str(out.get("snapshot", "")).startswith(f"[jobo: {LEVER} puts an hCaptcha"), str(out)[:200])
+
+
+def test_site_wall_runner():
+    print("\n[9] GHO-73: a job_url on Paycom or Lever is parked before any agent, uncharged")
+    s = _session()
+    j_lever = _job(s, 2134, f"https://{LEVER}/contoso/00000000-0000-4000-8000-000000000001/apply?lever-source=jobfound.org")
+    j_paycom = _job(s, 2197, f"https://{PAYCOM}/v4/ats/web.php/portal/0000000000000000000000000000C0DE/jobs/100001")
+    j_li = _job(s, 2198, "https://www.linkedin.com/jobs/view/2198/")
+    ok = agent_driver.ApplyOutcome("submitted", "submitted")
+    res, spawned = _run(s, ok)
+    for j in (j_lever, j_paycom, j_li):
+        s.refresh(j)
+    check("no agent for the Lever and Paycom jobs; the LinkedIn job runs", spawned == [2198], str(spawned))
+    check("Lever parked on its host, attempts untouched",
+          (j_lever.module4_last_status or "").startswith(f"captcha_wall:{LEVER} |")
+          and not j_lever.module4_attempts and j_lever.should_apply is True, j_lever.module4_last_status)
+    check("Paycom parked on its host",
+          (j_paycom.module4_last_status or "").startswith(f"captcha_wall:{PAYCOM} |"), j_paycom.module4_last_status)
+    check("detail says why (every visitor), not 'another job on this host'",
+          "every visitor" in (j_lever.module4_last_status or ""), j_lever.module4_last_status)
+    check("counted as captcha_parked", res.captcha_parked == 2 and res.failed == 0 and res.dropped == 0, str(res.captcha_parked))
+    check("run-report files them under captcha:wall_parked (needs_g)",
+          run_report.signature_for(j_lever.module4_last_status) == "captcha:wall_parked")
+
+    print("\n[10] GHO-73: a LinkedIn job that lands on Lever mid-run is parked, LinkedIn not walled")
+    s2 = _session()
+    j = _job(s2, 2201, "https://www.linkedin.com/jobs/view/2201/")
+    _run(s2, agent_driver.ApplyOutcome("captcha_wall", "hCaptcha wall at jobs.lever.co"))
+    s2.refresh(j)
+    check("parked on jobs.lever.co, not charged",
+          (j.module4_last_status or "").startswith(f"captcha_wall:{LEVER} |") and not j.module4_attempts,
+          f"{j.module4_last_status} {j.module4_attempts}")
+    j2 = _job(s2, 2202, "https://www.linkedin.com/jobs/view/2202/")
+    _, spawned = _run(s2, ok)
+    check("the next LinkedIn job still gets an agent", spawned == [2202], str(spawned))
+
+
+def test_router_park():
+    print("\n[11] GHO-73: the parallel router parks a listing whose Apply link is on Lever; no form agent")
+    from module4 import apply_queue, linkedin_router, parallel
+
+    tmp = Path(tempfile.mkdtemp(prefix="gho73_"))
+    engine = create_engine(f"sqlite:///{tmp}/jobs.db", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    s = Session()
+    j = _job(s, 2300, "https://www.linkedin.com/jobs/view/2300/")
+    q = apply_queue.ApplyQueue("test_gho73", path=tmp / "queue.sqlite")
+    q.create_run([(2300, "Contoso")])
+    li = parallel.Worker("li", parallel.ROLE_LINKEDIN, q, form_workers=1, poll_sec=0.01)
+    q.register_worker("f1", parallel.ROLE_FORM, None, None)  # a live form worker, so the LinkedIn worker routes
+    route = linkedin_router.Route(linkedin_router.EXTERNAL, f"https://{LEVER}/contoso/abc/apply", "ext")
+
+    def resolve(cdp, url):
+        q.worker_done("f1")  # then the LinkedIn worker stops once nothing is left (a hand-off it would apply itself)
+        return route
+
+    with patch.object(linkedin_router, "resolve", side_effect=resolve):
+        res, spawned = _run(s, agent_driver.ApplyOutcome("submitted", "submitted"), worker=li)
+    s.refresh(j)
+    check("no agent ran", spawned == [], str(spawned))
+    check("parked on the Lever host, uncharged",
+          (j.module4_last_status or "").startswith(f"captcha_wall:{LEVER} |") and not j.module4_attempts,
+          j.module4_last_status)
+    check("not handed to a form worker", q.pending(apply_queue.ROUTE_FORM) == 0 and res.routed_form == 0)
+    check("counted as captcha_parked", res.captcha_parked == 1, str(res.captcha_parked))
+
+
 def main() -> int:
     test_guard()
     test_verdict_and_rules()
     test_runner()
+    test_site_wall_guard()
+    test_site_wall_runner()
+    test_router_park()
     print(f"\n{PASS}/{PASS + FAIL} passed")
     return 1 if FAIL else 0
 

@@ -34,6 +34,14 @@ tiles and drags first. It ends the run at once. On Oracle Cloud and iCIMS the
 challenge gates the email step for every visitor (module4/captcha_walls.py),
 so there it ends as STATUS: captcha_wall and the job is parked, not charged.
 
+Paycom and Lever challenge every visitor too (GHO-73), but their challenge
+never shows in a snapshot: Lever's hCaptcha enclave is one page-sized iframe
+("Widget containing checkbox for hCaptcha security challenge") with the puzzle
+nested inside, and Paycom's challenge frame stays out of the accessibility
+tree. 2134 spent 72 steps clicking Lever's Submit and 2197 33 steps on Paycom.
+So reaching a page on one of those hosts ends the run (STATUS: captcha_wall)
+before any field is filled, unless the page says the posting is closed.
+
 State is per Hermes process (one agent run; a NEED_* handoff starts a new
 process, which is fine: the counters only need to stop loops inside a run).
 """
@@ -66,9 +74,10 @@ _HCAPTCHA_CONTROLS = re.compile(
     r'^\s*- button "(?:Skip Challenge|Refresh Challenge|Challenge refreshed)', re.I | re.M
 )
 
-# Same list as module4/captcha_walls.GATE_HOST_SUFFIXES (this plugin cannot
-# import module4); scripts/test_hcaptcha_walls.py keeps the two equal.
-GATE_HOST_SUFFIXES = ("oraclecloud.com", "icims.com")
+# Same lists as module4/captcha_walls (this plugin cannot import module4);
+# scripts/test_hcaptcha_walls.py keeps them equal.
+SITE_WALL_HOST_SUFFIXES = ("paycomonline.net", "lever.co")
+GATE_HOST_SUFFIXES = ("oraclecloud.com", "icims.com") + SITE_WALL_HOST_SUFFIXES
 
 CAPTCHA_FAILED_DETAIL = "DataDome bot wall (geo.captcha-delivery.com); cannot be passed by an agent"
 
@@ -94,6 +103,11 @@ def is_tracker_url(url: str) -> bool:
 def is_gate_host(host: str) -> bool:
     h = (host or "").lower().rstrip(".")
     return any(h == s or h.endswith("." + s) for s in GATE_HOST_SUFFIXES)
+
+
+def is_site_wall_host(host: str) -> bool:
+    h = (host or "").lower().rstrip(".")
+    return any(h == s or h.endswith("." + s) for s in SITE_WALL_HOST_SUFFIXES)
 
 
 def _page_url(data: dict) -> str:
@@ -249,6 +263,20 @@ def hcaptcha_notice(host: str) -> str:
     )
 
 
+def site_wall_notice(host: str) -> str:
+    return (
+        f"[jobo: {host} puts an hCaptcha challenge in front of every application "
+        "(tested in fresh browsers), and the agent has never passed it. The challenge "
+        "does not show in snapshots, so Submit or Continue just does nothing. Do not "
+        "fill this form. If this page says the posting is closed or not found, end with "
+        "STATUS: closed as usual. Otherwise this job is parked and costs no attempt. "
+        "End NOW with:\n"
+        "STATUS: captcha_wall\n"
+        f"DETAIL: hCaptcha wall at {host}\n"
+        "FIELDS_FILLED_JSON: {}]"
+    )
+
+
 JIGSAW_NOTICE = (
     "[jobo: this form has a jigsaw 'Slide to verify' captcha. Do not drag it yourself "
     "and do not study it with browser_vision. Fill every other field first, then print "
@@ -276,10 +304,13 @@ def observe(tool_name: str, result) -> tuple[str, str] | None:
     was_wall = _state["datadome"]
     _state["datadome"] = kind == "datadome"
     _state["hcaptcha"] = kind == "hcaptcha"
+    host = _host(_state["url"])
+    if not kind and is_site_wall_host(host):
+        return "hcaptcha_site", site_wall_notice(host)
     if not kind:
         return None
     if kind == "hcaptcha":
-        return kind, hcaptcha_notice(_host(_state["url"]))
+        return kind, hcaptcha_notice(host)
     if kind == "datadome":
         if not was_wall:
             _state["walls"] += 1
