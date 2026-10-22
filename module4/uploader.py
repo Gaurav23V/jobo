@@ -161,6 +161,8 @@ class UploadTarget:
             place += f" inside {self.where_chain.split(' < ')[0][:70]}"
         if self.where_heading:
             place += f' under "{self.where_heading[:40]}"'
+        if any(m in self.context for m in _AUTOFILL_MARKS):
+            place += " (autofill zone)"
         return (" ".join(bits) or "<no identifying attributes>") + suffix + place
 
     def score_for(self, want: str) -> int:
@@ -212,6 +214,12 @@ class UploadTarget:
                     score += 5 if kind == want else -3
             if any(w in ctx for w in ("photo", "avatar", "profile picture", "headshot")):
                 score -= 50
+            # An "Autofill from resume" zone names the resume too, but only
+            # parses it into the form; the field's own slot is the one that
+            # is submitted. Dover (Kulfi 1999): identical attributes, and the
+            # autofill zone's text gave it the higher score.
+            if any(m in ctx for m in _AUTOFILL_MARKS):
+                score -= 8
 
         # Multi-file inputs are usually generic attachment slots: fine, but
         # less specific than a dedicated one.
@@ -613,7 +621,10 @@ _CONTEXT_JS = r"""function(){
   let n = this.parentElement;
   for (let k = 0; k < 3 && n; k++, n = n.parentElement) {
     bits.push(String(n.id || ''), String(n.className && n.className.baseVal !== undefined ? n.className.baseVal : n.className || ''));
-    if (n.tagName === 'LABEL') bits.push((n.innerText || '').slice(0, 80));
+    // Dover (Kulfi 1999) wraps each input in its own role=button dropzone;
+    // its text ("Autofill from resume ...") is all that names the zone.
+    if (n.tagName === 'LABEL' || n.tagName === 'BUTTON' || n.getAttribute('role') === 'button')
+      bits.push((n.innerText || '').slice(0, 80));
   }
   if (this.labels) for (const l of this.labels) bits.push((l.innerText || '').slice(0, 80));
   const sib = this.parentElement && this.parentElement.querySelector('button, [role=button]');
@@ -641,12 +652,25 @@ _HEADING_JS = r"""function(){
     if (tag.includes('-') && /TITLE|HEADING|HEADER/.test(tag)) return true;
     return /(^|[-_])(section-)?(title|heading)$/i.test(el.getAttribute('data-test') || el.getAttribute('data-testid') || '');
   };
+  const text = (el) => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
   let n = this;
   for (let k = 0; k < 14 && n; k++) {
     for (let c = n.previousElementSibling; c; c = c.previousElementSibling) {
-      if (isHeading(c)) return (c.innerText || c.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      if (isHeading(c)) return text(c).slice(0, 80);
     }
     n = n.parentElement || (n.parentNode && n.parentNode.host) || null;
+  }
+  // No real heading: a short plain-text field label just above the input.
+  // Dover (Kulfi 1999) labels its required upload with `<div>Resume *</div>`
+  // beside the dropzone, while its autofill dropzone has no label at all.
+  const control = 'input, button, select, textarea, [role=button]';
+  n = this;
+  for (let k = 0; k < 3 && n; k++, n = n.parentElement) {
+    for (let c = n.previousElementSibling; c; c = c.previousElementSibling) {
+      if (c.matches(control) || c.querySelector(control)) continue;
+      const t = text(c);
+      if (t && t.length <= 60) return t;
+    }
   }
   return '';
 }"""
@@ -801,17 +825,29 @@ def _hint_matches(target: UploadTarget, hint: str) -> bool:
         # ("inside spl-dropzone[data-test=resume-upload]").
         if val and f"[{key}={val}" in chain:
             return True
-    # The section heading we print in the descriptor: `under "Resume"`.
-    heading = target.where_heading.lower().strip()
-    if heading and any(q.strip() == heading for q in re.findall(r'"([^"]+)"', hint)):
+    # The section heading we print in the descriptor: `under "Resume"`. A
+    # required marker is not part of the name: `under "Resume"` is the field
+    # labelled "Resume *" (Dover, Kulfi 1999). Quoted text the agent rules
+    # out (`not the "Autofill from resume" one`) names nothing to pick.
+    quoted = re.findall(r'(?<!not )(?<!not the )"([^"]+)"', hint)
+    heading = _bare(target.where_heading)
+    if heading and any(_bare(q) == heading for q in quoted):
         return True
-    return False
+    # The dropzone's own text, as the agent read it off the page.
+    squash = lambda s: re.sub(r"\s+", "", s)
+    zone = squash(target.context)
+    return any(len(q) >= 8 and squash(q) in zone for q in quoted)
+
+
+def _bare(label: str) -> str:
+    return label.lower().strip().rstrip("*").strip()
 
 
 # Words that mark an "upload your resume to autofill the form" zone. On a
 # form that also has a dedicated resume slot, that zone is the wrong default.
 _AUTOFILL_MARKS = ("easy apply", "easy-apply", "autofill", "auto-fill", "autocomplete",
-                   "apply-with", "apply with", "prefill", "quick apply")
+                   "apply-with", "apply with", "prefill", "quick apply",
+                   "import your profile", "import resume", "import from resume")
 
 
 def _where_score(target: UploadTarget, want: str) -> int:
@@ -836,6 +872,9 @@ def _where_score(target: UploadTarget, want: str) -> int:
     # only `context` sees.
     if any(m in where or m in target.context for m in _AUTOFILL_MARKS):
         score -= 2
+    # The form's own required slot over an optional one.
+    if "required" in target.attrs or target.attrs.get("aria-required") == "true":
+        score += 1
     return score
 
 

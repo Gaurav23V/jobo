@@ -21,6 +21,11 @@
     ?site=heron        Heron 1648: a cookie banner over a Workday start page with
                       an "Autofill with Resume" button and no file input.
     ?site=twins       two inputs nothing tells apart.
+    ?site=dover       Kulfi 1999 (app.dover.com, measured 2026-10-22): two
+                      byte-identical hidden `accept=.pdf multiple` inputs in one
+                      form, each the only child of a role=button dropzone. The
+                      first dropzone reads "Autofill from resume"; the second
+                      has a plain `<div>Resume *</div>` label beside it.
 -->
 <style>
   .hidden-input { display: none; }
@@ -80,6 +85,25 @@ if (site === "turbohire") {
 
 if (site === "twins") {
   root.innerHTML = `<div><input type="file" class="hidden-input"></div><div><input type="file" class="hidden-input"></div>`;
+}
+
+if (site === "dover") {
+  const zone = (text) => `<div role="button" tabindex="0" class="MuiBox-root css-zone">
+      <input accept=".pdf" multiple type="file" autocomplete="off" tabindex="-1" style="display: none;">${text}</div>`;
+  root.innerHTML = `<div class="InboundApplication__FormWrapper"><div>Apply</div><form novalidate>
+    <div class="MuiBox-root css-1qm1lh">${zone(`<div>Autofill from resume</div>
+      <div>Drag &amp; drop or upload to autofill your application.</div><button type="button">Upload file</button>`)}</div>
+    <div>First Name *</div><input type="text" value="Alex">
+    <div>This role is full-time and in-person. Can you commute?</div><input type="radio">
+    <div class="MuiBox-root css-1qm1lh"><div>Resume *</div>
+      <div class="MuiBox-root css-wavixi">${zone(`<p>Drag and drop file or browse computer</p><p>(PDF, 5 MB maximum)</p>`)}</div></div>
+    <button type="submit">Submit</button></form></div>`;
+  const inputs = root.querySelectorAll("input[type=file]");
+  inputs.forEach((inp, i) => {
+    // Slot by position, not a test attribute: an attribute would be scored.
+    const slot = i === 0 ? "autofill" : "resume";
+    inp.addEventListener("change", () => { bump(slot); if (inp.files[0]) chip(inp.files[0].name); });
+  });
 }
 
 if (site === "eightfold") {

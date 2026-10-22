@@ -15,6 +15,13 @@
     Live (19:18 run, GHO-26) the same dialog was never found on 1745/1757:
     it fades in by CSS transitions, and on the form workers' hidden pages
     animations never advance, so it sat open at visibility:hidden.
+  * Kulfi 1999 (Dover): two byte-identical hidden inputs in one form, an
+    "Autofill from resume" dropzone and the required "Resume *" field. The
+    tie-break read neither the dropzone's own text (the input's parent is
+    the role=button) nor the plain-div label, so the default request and all
+    four of the agent's hints (`under "Resume"`, `under "Resume *" heading
+    ..., not the "Autofill from resume" one`, the dropzone text) were refused
+    as ambiguous until the job's upload cap ran out (GHO-74).
   * Heron 1648: the agent asked for an upload on a Workday start page whose
     "Autofill with Resume" click a cookie banner had swallowed. There was no
     input; the job then stopped on Workday account creation, not on upload.
@@ -105,6 +112,26 @@ def _checks() -> int:
         res, st = run("site=turbohire", hint)
         check(f"hint {hint[:40]!r} -> the Upload Resume input, not Autofill",
               res.ok and st["uploads"] == {"resume": 1}, f"ok={res.ok} uploads={st['uploads']} {res.detail[:60]}")
+
+    print("\nKulfi / Dover: Autofill-from-resume dropzone vs the Resume * field")
+    for hint in ("", 'under "Resume" (Drag and drop file or browse computer)',
+                 'under "Resume *" heading (Drag and drop file or browse computer), '
+                 'not the "Autofill from resume" one',
+                 'inside button labeled "Drag and drop file or browse computer (PDF, 5 MB maximum)"',
+                 'second file input, parent text "Drag and drop file or browse computer(PDF, 5 MB maximum)"'):
+        res, st = run("site=dover", hint)
+        check(f"hint {hint[:40]!r} -> the Resume * input, not Autofill",
+              res.ok and st["uploads"] == {"resume": 1}, f"ok={res.ok} uploads={st['uploads']} {res.detail[:60]}")
+    res, st = run("site=dover", 'the "Autofill from resume" zone')
+    check("the agent can still ask for the autofill zone by name",
+          res.ok and st["uploads"] == {"autofill": 1}, f"ok={res.ok} uploads={st['uploads']}")
+    tab = open_probe("site=dover")
+    try:
+        names = [t.descriptor for t in uploader.find_file_inputs(CDP)]
+    finally:
+        urllib.request.urlopen(f"{CDP}/json/close/{tab['id']}", timeout=5).read()
+    check("candidates name the autofill zone and the Resume * field",
+          sorted(names) == ['accept=".pdf" (autofill zone)', 'accept=".pdf" under "Resume *"'], str(names))
 
     print("\nHint parsing")
     t = uploader.UploadTarget(1, {"type": "file", "accept": ".pdf"}, "t", "ws",
