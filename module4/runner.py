@@ -164,6 +164,10 @@ MAX_CONSECUTIVE_SIGN_IN_MISREADS = 3
 # While paused for the 5-hour session window to reset (GHO-22), how often to
 # look at the run's stop flag. Clock seams: tests drive a fake clock.
 SESSION_PAUSE_POLL_SEC = 30.0
+# Blind usage reads (GHO-86): re-read this often while holding claims, and
+# stop the stage if no read succeeds for this long.
+BLIND_POLL_SEC = 60.0
+BLIND_HOLD_MAX_SEC = 900.0
 _monotonic = time.monotonic
 _wall = time.time
 _sleep = time.sleep
@@ -574,6 +578,44 @@ def _pause_for_session_reset(resets_at, cause, deadline, result, worker, left) -
     return True
 
 
+def _read_usage(budget_check, when: str) -> budget_guard.BudgetCheck:
+    """One usage read and its log line. A blind stretch logs its notice once,
+    not an UNREADABLE line per job (GHO-86)."""
+    budget = budget_check()
+    if budget.notice:
+        logger.warning(budget.notice)
+    if not (budget.blind and budget.utilization is None and budget.session_utilization is None):
+        logger.info("Claude usage %s: %s", when, budget_guard.usage_summary(budget))
+    return budget
+
+
+def _hold_while_blind(budget, budget_check, deadline, result, worker, left):
+    """Claim nothing until a usage read succeeds. The check that ended the
+    hold, or None when the stage stopped (hold too long, deadline, stop flag)."""
+    end = min(_monotonic() + BLIND_HOLD_MAX_SEC, deadline)
+    logger.warning("Holding claims: %s.", budget.blind_stop)
+    while budget.blind_stop:
+        stop = worker.queue.stop_reason() if worker is not None else None
+        if stop:
+            logger.warning("Run stop flag set while holding for a usage read (%s); stopping.", stop)
+            result.details.append(f"usage-read hold ended by the run stop flag ({stop})")
+            return None
+        if _monotonic() >= end:
+            reason = f"{budget.blind_stop}, so it stopped with {left()} job(s) left queued"
+            logger.error("Stopping the apply stage: %s.", reason)
+            result.session_limit_stop = reason
+            result.details.append(f"SESSION STOP: {reason}")
+            if worker is not None:
+                worker.stop_all("Claude usage unreadable")
+            return None
+        _sleep(min(BLIND_POLL_SEC, max(0.0, end - _monotonic())))
+        budget = budget_check()
+        if budget.notice:
+            logger.warning(budget.notice)
+    logger.info("Claims resume: %s", budget_guard.usage_summary(budget))
+    return budget
+
+
 def _apply_by_email(session, job, outcome, result: "Module4Result", pace_url: str) -> None:
     """Send (or draft) the application email a mailto-only posting asks for."""
     jid = job.id
@@ -644,7 +686,7 @@ def run_module4(
     (off when JOBO_ATTACH_CANARY=0); `canary_only` stops right after it.
     """
     budget_check = budget_check or (
-        lambda: budget_guard.check_budget(
+        lambda: budget_guard.check_budget_in_run(
             threshold=budget_guard.threshold_from_env(),
             override=budget_guard.override_from_env(),
         )
@@ -760,8 +802,13 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
         # after the whole queue. The job already in flight (this iteration)
         # already finished by the time this check runs again, so nothing is
         # interrupted mid-application.
-        budget = budget_check()
-        logger.info("Claude usage before job %s: %s", job.id, budget_guard.usage_summary(budget))
+        budget = _read_usage(budget_check, f"before job {job.id}")
+        # Reads failing too long, or the last good 5h reading near the line
+        # (GHO-86): hold claims until a read succeeds rather than go on blind.
+        if budget.blind_stop:
+            budget = _hold_while_blind(budget, budget_check, deadline, result, worker, left)
+            if budget is None:
+                break
         if budget.should_stop:
             remaining = left()
             if worker is not None:
@@ -800,8 +847,12 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             if not _pause_for_session_reset(budget.session_resets_at, cause, deadline, result, worker, left):
                 session_ok = False
                 break
-            budget = budget_check()
-            logger.info("Claude usage after the pause: %s", budget_guard.usage_summary(budget))
+            budget = _read_usage(budget_check, "after the pause")
+            if budget.blind_stop:
+                budget = _hold_while_blind(budget, budget_check, deadline, result, worker, left)
+                if budget is None:
+                    session_ok = False
+                    break
         if not session_ok:
             break
 

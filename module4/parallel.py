@@ -302,12 +302,14 @@ def run_parallel(
 
     result = Module4Result()
     budget_check = budget_check or (
-        lambda: budget_guard.check_budget(
+        lambda: budget_guard.check_budget_in_run(
             threshold=budget_guard.threshold_from_env(),
             override=budget_guard.override_from_env(),
         )
     )
     budget = budget_check()
+    if budget.notice:
+        logger.warning(budget.notice)
     logger.info("Claude usage at run start: %s", budget_guard.usage_summary(budget))
     if budget.should_stop:
         result.budget_exhausted = True

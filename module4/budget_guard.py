@@ -32,14 +32,18 @@ not depend on hermes's internal modules being importable.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import pwd
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 DEFAULT_THRESHOLD = 0.50  # stop at 50% weekly usage (was 0.75)
@@ -123,6 +127,32 @@ def fetch_usage(token: str, *, timeout: float = 15.0) -> tuple[dict | None, str 
     existing Hermes usage guard logs-and-retries rather than ever treating an
     unreadable read as a breach (or as all-clear).
     """
+    payload, error, _ = fetch_usage_detail(token, timeout=timeout)
+    return payload, error
+
+
+def retry_after_seconds(value: str | None, *, now: float | None = None) -> float | None:
+    """A Retry-After header (delta seconds or an HTTP date) as seconds, or None."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, when.timestamp() - (time.time() if now is None else now))
+
+
+def fetch_usage_detail(
+    token: str, *, timeout: float = 15.0
+) -> tuple[dict | None, str | None, float | None]:
+    """fetch_usage plus the server's Retry-After (seconds) when it sent one."""
     req = urllib.request.Request(
         USAGE_URL,
         headers={
@@ -136,11 +166,14 @@ def fetch_usage(token: str, *, timeout: float = 15.0) -> tuple[dict | None, str 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        retry = retry_after_seconds(e.headers.get("Retry-After") if e.headers else None)
+        return None, f"usage endpoint unreadable: {type(e).__name__}: {e}"[:200], retry
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as e:
-        return None, f"usage endpoint unreadable: {type(e).__name__}: {e}"[:200]
+        return None, f"usage endpoint unreadable: {type(e).__name__}: {e}"[:200], None
     if not isinstance(payload, dict):
-        return None, "usage payload is not a JSON object"
-    return payload, None
+        return None, "usage payload is not a JSON object", None
+    return payload, None, None
 
 
 def fetch_seven_day_usage(
@@ -200,6 +233,16 @@ class BudgetCheck:
     session_utilization: float | None = None  # None = unreadable
     session_threshold: float = DEFAULT_SESSION_THRESHOLD
     session_resets_at: str | None = None
+    # The in-run read (check_budget_in_run, GHO-86) only. `blind`: this
+    # call's read failed; the windows above are the last good reading, if
+    # recent enough, with `reading_age` its age in seconds. `blind_stop`:
+    # reads have failed too long, or the last good session reading was
+    # near the line - claim no new job. `notice`: a line to log once per
+    # blind stretch (its start and its end), else None.
+    blind: bool = False
+    reading_age: float | None = None
+    blind_stop: str | None = None
+    notice: str | None = None
 
     @property
     def session_limited(self) -> bool:
@@ -268,6 +311,190 @@ def check_budget(
         session_utilization=session, session_threshold=session_threshold,
         session_resets_at=session_resets_at,
     )
+
+
+# -- the in-run read (GHO-86) --------------------------------------------------
+# On 23 Oct 22:00 four lanes read the endpoint before every job and 45 of 79
+# reads got HTTP 429; an unreadable read meant "proceed", so the 5h gate ran
+# blind for two 6-minute stretches while session usage went 11% -> 25%.
+# Lanes are separate processes, so they share one reading through a file.
+USAGE_CACHE_ENV = "JOBO_USAGE_CACHE"
+USAGE_CACHE_TTL_SEC = 60.0  # a reading this fresh is reused without a request
+BACKOFF_BASE_SEC = 60.0  # after a failed read with no Retry-After, doubling per failure
+BACKOFF_MAX_SEC = 300.0
+STALE_LIMIT_SEC = 600.0  # no good reading for longer than this: claim no new job
+SESSION_MARGIN = 0.05  # a last good session reading this close to the line: claim no new job
+# No failed read for this long: the old stretch belongs to an earlier run.
+# Within a run lanes read at least once per job, well inside an hour.
+STRETCH_GAP_SEC = 3600.0
+
+
+def usage_cache_path() -> Path:
+    raw = os.environ.get(USAGE_CACHE_ENV, "").strip()
+    if raw:
+        return Path(raw)
+    return Path(__file__).resolve().parent.parent / "data" / "claude_usage_cache.json"
+
+
+@contextmanager
+def _locked(path: Path) -> Iterator[None]:
+    """One reader at a time across lanes; the others then reuse its reading."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _load_state(path: Path) -> dict:
+    try:
+        state = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _save_state(path: Path, state: dict) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(state))
+    os.replace(tmp, path)
+
+
+def _backoff(retry_after: float | None, failures: int) -> float:
+    if retry_after is not None:
+        return min(retry_after, BACKOFF_MAX_SEC)
+    return min(BACKOFF_BASE_SEC * 2 ** max(0, failures - 1), BACKOFF_MAX_SEC)
+
+
+def _fetch_with_token(host_home: Path | None) -> tuple[dict | None, str | None, float | None]:
+    token = read_access_token(host_home)
+    if not token:
+        return None, f"no unexpired OAuth token in {credentials_path(host_home)}", None
+    return fetch_usage_detail(token)
+
+
+def _minutes(sec: float) -> str:
+    return f"{sec / 60:.0f} min"
+
+
+def check_budget_in_run(
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+    override: bool = False,
+    session_threshold: float | None = None,
+    host_home: Path | None = None,
+    cache_path: Path | None = None,
+    fetcher: Callable[[], tuple[dict | None, str | None, float | None]] | None = None,
+    now: Callable[[], float] = time.time,
+) -> BudgetCheck:
+    """The apply stage's between-jobs usage read, shared by every lane.
+
+    A reading under USAGE_CACHE_TTL_SEC old is reused without a request.
+    After a failed read no lane asks again before Retry-After (or a
+    doubling backoff) has passed. While reads fail, decisions use the last
+    good reading if it is under STALE_LIMIT_SEC old, and `blind_stop` is
+    set once there has been no good reading for longer than that, or when
+    the last good session reading in the same 5h window was within
+    SESSION_MARGIN of the line. The pipeline-level `jobo budget-gate` keeps check_budget, where
+    unreadable still means proceed.
+
+    `fetcher() -> (payload, error, retry_after_sec)` and `now` are the test
+    seams; the default fetcher reads the token and calls the endpoint.
+    """
+    if session_threshold is None:
+        session_threshold = session_threshold_from_env()
+    path = cache_path or usage_cache_path()
+    fetcher = fetcher or (lambda: _fetch_with_token(host_home))
+    notice = None
+    with _locked(path):
+        state = _load_state(path)
+        t = now()
+        good = state.get("good")
+        age = t - good["ts"] if good else None
+        fresh = age is not None and 0 <= age < USAGE_CACHE_TTL_SEC
+        if not fresh and t >= state.get("retry_at", 0.0):
+            payload, error, retry_after = fetcher()
+            if payload is not None:
+                if state.get("blind_since") is not None:
+                    notice = (
+                        f"Claude usage readable again after {_minutes(t - state['blind_since'])} "
+                        f"of failed reads ({state.get('failures', 0)} failed)."
+                    )
+                state = {"good": {"ts": t, "payload": payload}}
+                good, age, fresh = state["good"], 0.0, True
+            else:
+                if t - state.get("last_fail", t) > STRETCH_GAP_SEC:
+                    # A stretch left over from an earlier run: start a new one.
+                    state = {"good": good} if good else {}
+                state["failures"] = state.get("failures", 0) + 1
+                state["error"] = error
+                state["last_fail"] = t
+                state["retry_at"] = t + _backoff(retry_after, state["failures"])
+                if state.get("blind_since") is None:
+                    state["blind_since"] = t
+        if fresh:
+            _save_state(path, state)
+            return _decide_payload(
+                good["payload"], threshold, override, session_threshold,
+                reading_age=age, notice=notice,
+            )
+
+        # Blind since the last good reading, when that came in the same run;
+        # since the first failed read when it is from an earlier one.
+        anchor = state["blind_since"]
+        if good is not None and anchor - good["ts"] <= STRETCH_GAP_SEC:
+            anchor = good["ts"]
+        blind_for = t - anchor
+        error = state.get("error") or "unknown error"
+        recent = good is not None and age <= STALE_LIMIT_SEC
+        if recent:
+            check = _decide_payload(
+                good["payload"], threshold, override, session_threshold, reading_age=age,
+            )
+            check.error = check.error or error
+        else:
+            check = decide(None, threshold, override=override, error=error,
+                           session_threshold=session_threshold)
+        check.blind = True
+        if not state.get("noticed"):
+            state["noticed"] = True
+            last = f"the last good reading ({_minutes(age)} old)" if recent else "no recent reading"
+            check.notice = (
+                f"Claude usage reads failing ({error}); using {last}. Logged once until "
+                f"reads recover; no new job is claimed after {_minutes(STALE_LIMIT_SEC)} "
+                f"without a good reading."
+            )
+        if blind_for > STALE_LIMIT_SEC:
+            check.blind_stop = (
+                f"no good Claude usage reading for {_minutes(blind_for)} "
+                f"(limit {_minutes(STALE_LIMIT_SEC)}; {error})"
+            )
+        else:
+            last_session, last_resets, _ = parse_session_payload(good["payload"]) if good else (None, None, None)
+            same_window = (_reset_epoch(last_resets) or 0.0) > t
+            if same_window and last_session is not None and last_session >= session_threshold - SESSION_MARGIN:
+                check.blind_stop = (
+                    f"Claude usage unreadable ({error}) and the last good 5h session reading, "
+                    f"{last_session:.0%}, was within {SESSION_MARGIN * 100:.0f} points of the "
+                    f"{session_threshold:.0%} line"
+                )
+        _save_state(path, state)
+        return check
+
+
+def _decide_payload(payload, threshold, override, session_threshold, *, reading_age, notice=None) -> BudgetCheck:
+    utilization, resets_at, error = parse_usage_payload(payload)
+    session, session_resets_at, _ = parse_session_payload(payload)
+    check = decide(
+        utilization, threshold, resets_at=resets_at, override=override, error=error,
+        session_utilization=session, session_threshold=session_threshold,
+        session_resets_at=session_resets_at,
+    )
+    check.reading_age = reading_age
+    check.notice = notice
+    return check
 
 
 def threshold_from_env(
@@ -342,6 +569,8 @@ def usage_summary(check: BudgetCheck) -> str:
         weekly = f"weekly UNREADABLE ({check.error or 'unknown error'})"
     else:
         weekly = f"weekly {check.utilization * 100:.0f}%"
+    if check.blind and check.reading_age is not None:
+        weekly += f" [last good reading, {_minutes(check.reading_age)} old; reads failing]"
     return f"{session}, {weekly}"
 
 

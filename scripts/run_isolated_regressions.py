@@ -72,7 +72,7 @@ SUITES = (
     'test_reset_requeue', 'test_workday_click_filter',
     'test_workday_create_account',
     'test_hermes_pin', 'test_enrich_recovery',
-    'test_attach_canary', 'test_session_limit',
+    'test_attach_canary', 'test_session_limit', 'test_usage_read_429',
     'test_apply_speed', 'test_avature_stale_numbers',
     'test_setup_wizard', 'test_source_dedup', 'test_jobfound_source',
     'test_jobfound_stages', 'test_run_report', 'test_hcaptcha_walls',
