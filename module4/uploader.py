@@ -48,7 +48,7 @@ import time
 import urllib.error
 import urllib.request
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -138,6 +138,13 @@ class UploadTarget:
     # under "Resume". `context` stops at the shadow root, so both looked equal.
     where_chain: str = ""
     where_heading: str = ""
+    # The id of the input's form. Southridge (2297) renders one form per role,
+    # each with a byte-identical `input.cv-input` under the same "Apply"
+    # heading; the form id (`#engineer-form`) is the only thing that differs.
+    form_label: str = ""
+    # Per selector from `_hint_selectors(hint)`: does it match this input or
+    # an ancestor of it in the page? Empty when there was no hint.
+    hint_hits: tuple = ()
 
     @property
     def where(self) -> str:
@@ -161,6 +168,8 @@ class UploadTarget:
             place += f" inside {self.where_chain.split(' < ')[0][:70]}"
         if self.where_heading:
             place += f' under "{self.where_heading[:40]}"'
+        if self.form_label:
+            place += f" in form#{self.form_label[:40]}"
         if any(m in self.context for m in _AUTOFILL_MARKS):
             place += " (autofill zone)"
         return (" ".join(bits) or "<no identifying attributes>") + suffix + place
@@ -330,12 +339,19 @@ class _Cdp:
         self.requests: dict[str, dict] = {}
         # Page.fileChooserOpened events seen while interception was on.
         self.choosers: list[dict] = []
+        # Frames that are loading a new document (needs Page.enable). Started
+        # and stopped events come in pairs, a 204 or cancelled load included.
+        self.navigating: set[str] = set()
 
     def _on_event(self, msg: dict) -> None:
         method = msg.get("method")
         params = msg.get("params") or {}
         if method == "Page.fileChooserOpened":
             self.choosers.append(params)
+        elif method == "Page.frameStartedLoading":
+            self.navigating.add(params.get("frameId", ""))
+        elif method == "Page.frameStoppedLoading":
+            self.navigating.discard(params.get("frameId", ""))
         elif method == "Page.javascriptDialogOpening":
             self.dialogs.append(f"{params.get('type', 'dialog')}: {params.get('message', '')}"[:200])
             self._dialog_id += 1
@@ -535,7 +551,7 @@ def _walk(node: dict, out: list, *, depth: int, in_shadow: bool, in_frame: bool,
         _walk(content, out, depth=depth + 1, in_shadow=in_shadow, in_frame=True)
 
 
-def find_file_inputs(cdp_url: str) -> list[UploadTarget]:
+def find_file_inputs(cdp_url: str, hint: str = "") -> list[UploadTarget]:
     """Find every file input across every open page target.
 
     Scanning EVERY target is deliberate and load-bearing: popup-based apply
@@ -557,8 +573,12 @@ def find_file_inputs(cdp_url: str) -> list[UploadTarget]:
     `tab_rank` records the tab's position so ranking can prefer the active
     page and only fall back to background tabs when the active one has no
     usable input.
+
+    With a `hint`, each input also records which of the hint's CSS selectors
+    match it in the page (`hint_hits`, see `_select`).
     """
     found: list[UploadTarget] = []
+    selectors = _hint_selectors(hint)
     pages = list_page_targets(cdp_url)
     if pages:
         _saw_pages.set(True)
@@ -608,6 +628,8 @@ def find_file_inputs(cdp_url: str) -> list[UploadTarget]:
                             context=context,
                             where_chain=r.get("chain", ""),
                             where_heading=_heading_of(cdp, r['backendNodeId']),
+                            form_label=_call_on_node(cdp, r['backendNodeId'], _FORM_ID_JS)[:80],
+                            hint_hits=_selector_hits(cdp, r['backendNodeId'], selectors),
                         )
                     )
         except Exception as e:
@@ -680,13 +702,61 @@ def _heading_of(cdp: _Cdp, backend_node_id: int) -> str:
     return _call_on_node(cdp, backend_node_id, _HEADING_JS)
 
 
-def _call_on_node(cdp: _Cdp, backend_node_id: int, js: str) -> str:
+_FORM_ID_JS = r"""function(){
+  const f = this.form || this.closest('form');
+  return f && f.id ? String(f.id) : '';
+}"""
+
+# Does a selector match the input itself or one of its ancestors? Evaluated in
+# the input's own root (shadow or document) and the document. 1/0 per
+# selector, or -1 when the browser rejects it as CSS.
+_SELECTOR_HITS_JS = r"""function(sels){
+  const roots = [this.getRootNode()];
+  if (roots[0] !== document) roots.push(document);
+  return JSON.stringify(sels.map((s) => {
+    try {
+      for (const r of roots)
+        for (const m of r.querySelectorAll(s)) if (m === this || m.contains(this)) return 1;
+      return 0;
+    } catch (e) { return -1; }
+  }));
+}"""
+
+
+def _hint_selectors(hint: str) -> list[str]:
+    """CSS selectors to try for a hint: the hint itself, each `#id` / `.class`
+    written inside it, and `#token` for each bare id-like word. Southridge
+    (2297) hints were `#engineer-form .cv-input` (a real selector),
+    `engineer-form` (the id, bare), and on the live retry `inside
+    #engineer-form .cv-input` and `under "Apply" in form#engineer-form`
+    (selectors inside prose, which the page rejects or matches nothing with)."""
+    hint = (hint or "").strip()
+    if not hint:
+        return []
+    sels = [hint]
+    sels += re.findall(r"[#.][A-Za-z][\w-]*", hint)
+    sels += [f"#{tok}" for tok in re.findall(r"(?<![#.\w-])([A-Za-z][\w]*[-_][\w-]*)", hint)]
+    return list(dict.fromkeys(sels))[:8]
+
+
+def _selector_hits(cdp: _Cdp, backend_node_id: int, selectors: list[str]) -> tuple:
+    if not selectors:
+        return ()
+    raw = _call_on_node(cdp, backend_node_id, _SELECTOR_HITS_JS, [selectors])
+    try:
+        return tuple(int(x) for x in json.loads(raw))
+    except (ValueError, TypeError):
+        return ()
+
+
+def _call_on_node(cdp: _Cdp, backend_node_id: int, js: str, args: list | None = None) -> str:
     """Run a describe-only function on a node; empty string on any failure."""
     try:
         obj = _checked(cdp, 'DOM.resolveNode', {'backendNodeId': backend_node_id})['object']['objectId']
         try:
             res = _checked(cdp, 'Runtime.callFunctionOn', {
-                'objectId': obj, 'functionDeclaration': js, 'returnByValue': True})
+                'objectId': obj, 'functionDeclaration': js, 'returnByValue': True,
+                'arguments': [{'value': a} for a in (args or [])]})
             return str(res.get('result', {}).get('value') or '')
         finally:
             _checked(cdp, 'Runtime.releaseObject', {'objectId': obj})
@@ -878,8 +948,31 @@ def _where_score(target: UploadTarget, want: str) -> int:
     return score
 
 
-def _score(target: UploadTarget, want: str, hint: str) -> int:
-    return target.score_for(want) + (25 if _hint_matches(target, hint) else 0)
+def _score(target: UploadTarget, want: str, hint: str, picked: set | None = None) -> int:
+    matched = id(target) in picked if picked is not None else _hint_matches(target, hint)
+    return target.score_for(want) + (25 if matched else 0)
+
+
+def _selector_pick(targets: list[UploadTarget]) -> set | None:
+    """The inputs the hint's CSS selectors pick out, as ids; None when they
+    pick out nothing narrower than "all of them".
+
+    Every selector that matches at least one input must match a pick, so
+    `#engineer-form .cv-input` picks the engineer form's input even though
+    `.cv-input` alone matches all four. Selectors the page rejects or that
+    match nothing are ignored.
+    """
+    n = max((len(t.hint_hits) for t in targets), default=0)
+    picked = {id(t) for t in targets}
+    narrowed = False
+    for i in range(n):
+        hits = {id(t) for t in targets if i < len(t.hint_hits) and t.hint_hits[i] == 1}
+        if hits and hits != picked:
+            if not hits & picked:
+                return None  # the selectors disagree; fall back to attribute hints
+            picked &= hits
+            narrowed = True
+    return picked if narrowed else None
 
 
 def _is_hidden_copy(t: UploadTarget, targets: list[UploadTarget]) -> bool:
@@ -899,15 +992,21 @@ def _is_hidden_copy(t: UploadTarget, targets: list[UploadTarget]) -> bool:
 
 
 def _select(targets: list[UploadTarget], filename: str, want: str, hint: str) -> UploadTarget:
-    eligible = [t for t in targets if t.can_accept(filename) and _purpose_ok(t, want)
-                and not _is_hidden_copy(t, targets)]
+    usable = [t for t in targets if t.can_accept(filename) and _purpose_ok(t, want)]
+    picked = _selector_pick(usable)
+    # A hidden input the agent named by selector is the one it wants, even with
+    # a rendered twin elsewhere (Southridge 2297: four role panels, one input
+    # each, the wanted panel possibly still closed).
+    eligible = [t for t in usable if not _is_hidden_copy(t, targets)
+                or (picked is not None and id(t) in picked
+                    and not any(id(o) in picked for o in usable if o.context.endswith("__rendered__")))]
     if not eligible:
         raise RuntimeError("no file input accepts the requested file and purpose")
+    score = lambda t: _score(t, want, hint, picked)
     # Preserve all-target popup discovery and historical score/tab ordering.
-    eligible.sort(key=lambda t: (-_score(t, want, hint), t.tab_rank, t.depth))
+    eligible.sort(key=lambda t: (-score(t), t.tab_rank, t.depth))
     chosen = eligible[0]
-    ties = [t for t in eligible if t.target_id == chosen.target_id
-            and _score(t, want, hint) == _score(chosen, want, hint)]
+    ties = [t for t in eligible if t.target_id == chosen.target_id and score(t) == score(chosen)]
     if len(ties) > 1:
         # Keka (Northfold 974, measured on salesdemo.keka.com): a visible
         # input#resume-upload.resume-upload plus a hidden twin .resume-upload
@@ -976,14 +1075,15 @@ def _live_slot(cdp: _Cdp, original: UploadTarget, filename: str, want: str) -> U
             collect(node["contentDocument"])
     collect(root)
     if original.document_id not in ids or (original.form_id and original.form_id not in ids):
-        raise RuntimeError("original frame/document/form replaced; refusing scope drift")
+        raise RuntimeError(_SCOPE_DRIFT)
     candidates = []
     in_form = drifted = False
     for item in raw:
         t = UploadTarget(item["backendNodeId"], item["attrs"], original.target_id,
                          original.ws_url, item["depth"], item["in_shadow"], item["in_frame"],
                          original.tab_rank, item["document_id"], item["form_id"],
-                         where_chain=item.get("chain", ""), where_heading=original.where_heading)
+                         where_chain=item.get("chain", ""), where_heading=original.where_heading,
+                         form_label=original.form_label)
         if t.document_id != original.document_id:
             continue
         if original.identity_attrs:
@@ -1010,6 +1110,82 @@ def _live_slot(cdp: _Cdp, original: UploadTarget, filename: str, want: str) -> U
     if len(candidates) > 1:
         raise RuntimeError("ambiguous replacement upload slots in original form")
     return candidates[0] if candidates else None
+
+
+_SCOPE_DRIFT = "original frame/document/form replaced; refusing scope drift"
+_PAGE_JS = "JSON.stringify([location.origin + location.pathname, document.readyState])"
+
+
+def _page_address(cdp: _Cdp) -> tuple[str, str]:
+    raw = _checked(cdp, "Runtime.evaluate", {"expression": _PAGE_JS, "returnByValue": True})
+    addr, ready = json.loads(raw["result"]["value"])
+    return addr, ready
+
+
+def _rebind_after_reload(cdp: _Cdp, original: UploadTarget, page_addr: str,
+                         filename: str, want: str) -> UploadTarget | None:
+    """The same slot on a page that reloaded itself at the same address.
+
+    Hirebridge QuickApply (Humongous 2396, ASP.NET): the file input's
+    onchange clicks a hidden "parse" button, whose __doPostBack POSTs the whole
+    form, file included, and the server answers with a fresh copy of the same
+    page. Every node is new, so `_live_slot` refused it as scope drift four
+    times while each request was in fact a resume upload. A new document at
+    the same address with exactly one input of the same name/id is the same
+    slot; any other replacement (another address, the input gone or doubled,
+    a form swapped by script inside the same document) is still refused. None
+    while the new page is still loading.
+    """
+    keys = {k: v for k, v in original.identity_attrs.items() if k in ("name", "id", "data-testid")}
+    if not keys or original.in_frame or original.in_shadow:
+        raise RuntimeError(_SCOPE_DRIFT)
+    addr, ready = _page_address(cdp)
+    if addr != page_addr:
+        raise RuntimeError(f"the page moved to {addr[:80]} after the write; refusing scope drift")
+    if ready != "complete":
+        return None
+    root = _checked(cdp, "DOM.getDocument", {"depth": -1, "pierce": True}).get("root") or {}
+    if root.get("backendNodeId") == original.document_id:
+        # Same document, new form: page script swapped it, nothing was reloaded.
+        raise RuntimeError(_SCOPE_DRIFT)
+    raw: list[dict] = []
+    _walk(root, raw, depth=0, in_shadow=False, in_frame=False)
+    same = [r for r in raw if not r["in_frame"] and not r["in_shadow"]
+            and all(r["attrs"].get(k) == v for k, v in keys.items())]
+    if len(same) != 1:
+        raise RuntimeError(_SCOPE_DRIFT)
+    owner = _form_owner(cdp, same[0]["backendNodeId"])
+    if owner is None:
+        return None
+    new = replace(original, backend_node_id=same[0]["backendNodeId"], attrs=same[0]["attrs"],
+                  depth=same[0]["depth"], document_id=same[0]["document_id"], form_id=owner)
+    if not (new.can_accept(filename) and _purpose_ok(new, want)):
+        raise RuntimeError(_SCOPE_DRIFT)
+    return new
+
+
+# Our file name, anywhere in the page the server sent back: visible text,
+# markup (a script variable, a hidden input's value attribute) or a field
+# value. The name carries the job id and a content hash, so the page can only
+# hold it if the site received the file.
+_CARRIES_FILE_JS = r"""function(n){
+  const low = n.toLowerCase();
+  if ((document.documentElement.outerHTML || '').toLowerCase().includes(low)) return true;
+  for (const i of document.querySelectorAll('input, textarea'))
+    if (String(i.value || '').toLowerCase().includes(low)) return true;
+  return false;
+}"""
+
+
+def _page_carries_file(cdp: _Cdp, filename: str) -> bool:
+    doc = _checked(cdp, "Runtime.evaluate", {"expression": "document"})["result"]["objectId"]
+    try:
+        res = _checked(cdp, "Runtime.callFunctionOn", {
+            "objectId": doc, "functionDeclaration": _CARRIES_FILE_JS,
+            "arguments": [{"value": filename}], "returnByValue": True})
+        return bool(res.get("result", {}).get("value"))
+    finally:
+        _checked(cdp, "Runtime.releaseObject", {"objectId": doc})
 
 
 def _attach(cdp: _Cdp, target: UploadTarget, path: Path) -> None:
@@ -1390,6 +1566,8 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
     selected = None
     last = "no <input type=file> found in any open tab"
     consent = ""
+    consent_at = None
+    reloads = 0
     try:
         expected_size = path.stat().st_size
         with path.open('rb') as source:
@@ -1397,7 +1575,7 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
         # Readiness is polled, not a single fixed nap followed by a blind retry.
         while selected is None:
             _remaining()
-            targets = find_file_inputs(cdp_url)
+            targets = find_file_inputs(cdp_url, hint)
             descriptors = [t.descriptor for t in targets]
             if targets:
                 # Not "no <input type=file> found": that prefix told Myrtleby's
@@ -1415,6 +1593,8 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
             # otherwise freeze the page). Network: see the app's own upload call.
             _checked(cdp, "Page.enable")
             _checked(cdp, "Network.enable")
+            main_frame = _checked(cdp, "Page.getFrameTree")["frameTree"]["frame"]["id"]
+            page_addr = _page_address(cdp)[0]
             before = _app_state(cdp, path.name)
             req_mark = set(cdp.requests)
             writes = 0
@@ -1426,9 +1606,45 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
             chip_since = None
             while True:
                 _remaining()
+                if writes and main_frame in cdp.navigating:
+                    # The write sent the page away (Hirebridge posts the whole
+                    # form back on change). The old page's input proves nothing
+                    # now, and a re-sent change event would post it twice.
+                    _grant_inflight_grace(["page reload"], inflight_grace)
+                    stable_since = None
+                    last = "the page started reloading after the write and the new page has not loaded"
+                    cdp.pump(_remaining(UPLOAD_POLL_SEC))
+                    continue
                 if writes and not consent.startswith("accepted"):
                     consent = _answer_consent(cdp) or consent
-                current = _live_slot(cdp, selected, path.name, want)
+                    if consent.startswith("accepted"):
+                        consent_at = time.monotonic()
+                try:
+                    current = _live_slot(cdp, selected, path.name, want)
+                except RuntimeError as exc:
+                    if str(exc) != _SCOPE_DRIFT:
+                        raise
+                    rebound = _rebind_after_reload(cdp, selected, page_addr, path.name, want)
+                    if rebound is None:
+                        cdp.pump(_remaining(UPLOAD_POLL_SEC))
+                        continue
+                    selected = rebound
+                    previous_node = stable_since = empty_since = consumed_since = chip_since = None
+                    if writes:
+                        reloads += 1
+                        confirmed, rejected = _app_evidence(cdp, before, path.name, req_mark)
+                        if rejected:
+                            last = "site-side check after the page reloaded"
+                            raise RuntimeError(f"the site rejected the file: {'; '.join(rejected[:3])}")
+                        if _page_carries_file(cdp, path.name):
+                            return UploadResult(True,
+                                f"{path.name} sent to the site: the page posted the form back with the file "
+                                f"and reloaded, and the reloaded page carries {path.name} ({writes} write(s)). "
+                                "Its file input is empty again; that is expected, the site already has the file",
+                                selected.descriptor, descriptors, 0, selected.ws_url)
+                        last = ("the page reloaded itself after the write (the site posted the form back) "
+                                "and the reloaded page does not show the file")
+                    continue
                 if current is None and writes:
                     # Greenhouse (Eastlake 1266, measured live): on change the app
                     # uploads the file to S3, then REMOVES <input id=resume> and
@@ -1589,6 +1805,12 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
                                 cdp.pump(_remaining(UPLOAD_POLL_SEC))
                                 continue
                             consumed_since = None
+                            if consent_at is not None and now - consent_at < UPLOAD_SETTLE_SEC:
+                                # The site's upload starts only once its consent
+                                # dialog is answered, which just happened; a write
+                                # now would reopen the dialog (Munson 2623).
+                                cdp.pump(_remaining(UPLOAD_POLL_SEC))
+                                continue
                         if writes >= 2:
                             raise RuntimeError(last + "; retry limit reached")
                         # A short readiness window avoids consuming the only retry
@@ -1600,6 +1822,9 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
                 cdp.pump(_remaining(UPLOAD_POLL_SEC))
     except Exception as exc:
         pending = f"; {consent}" if consent and not consent.startswith("accepted") else ""
+        if reloads:
+            pending += (f"; the page posted the form back and reloaded after {reloads} write(s), and the "
+                        "reloaded page never showed the file")
         return UploadResult(False, f"{last}; {exc}{pending}", candidates=descriptors)
     finally:
         _deadline.reset(token)
@@ -1618,6 +1843,8 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
 # text is about privacy/consent/terms and that holds no file input. Nothing
 # else is clicked; a dialog
 # without such a button is reported to the agent instead.
+# Munson's Eightfold site (2623, GHO-85) names it "Data Privacy Notice" and
+# answers with "I understand" (beside Close / Cancel); that is the same accept.
 # Live (19:18 run, 1745/1757, GHO-26) the dialog was never found: the dialog
 # fades in through CSS transitions on opacity/visibility, and the form-worker
 # pages were hidden (Wayland windows GNOME suspends when covered, minimized or
@@ -1627,7 +1854,7 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
 # transitions are finished; then "I Agree" POSTs /resume_upload and the chip
 # shows the file, all without the page ever becoming visible.
 _CONSENT_TEXT_RE = r"privacy|consent|data protection|terms|agree"
-_CONSENT_BUTTON_RE = (r"^(?:yes,?\s*)?(?:i\s+)?(?:agree|accept|consent)"
+_CONSENT_BUTTON_RE = (r"^(?:yes,?\s*)?(?:i\s+)?(?:agree|accept|consent|understand)"
                       r"(?:\s+(?:and|&)\s+(?:continue|proceed|upload))?$")
 _CONSENT_JS = r"""function(textRe, btnRe){
   const tRe = new RegExp(textRe, 'i'), bRe = new RegExp(btnRe, 'i');

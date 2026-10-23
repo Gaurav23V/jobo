@@ -18,6 +18,8 @@
                       &stall=1 holds the fade at its start (a 600 s delay): the
                       headless test browser still finished it in a background
                       tab, the live headed workers did not.
+                      &notice=1 is Munson 2623 (GHO-85): the dialog is a
+                      "Data Privacy Notice" with Close / Cancel / I understand.
     ?site=heron        Heron 1648: a cookie banner over a Workday start page with
                       an "Autofill with Resume" button and no file input.
     ?site=twins       two inputs nothing tells apart.
@@ -120,6 +122,7 @@ if (site === "eightfold") {
     zone.innerHTML = `<input type="file" accept=".pdf,.doc,.docx,.txt" style="display:none">`;
     zone.firstChild.addEventListener("change", (ev) => {
       const file = ev.target.files[0];
+      st.changes = (st.changes || 0) + 1;
       // rc-upload: uploadFiles -> reset() remounts the input, then
       // beforeUpload awaits ensureConsent() before anything is POSTed.
       setTimeout(mount, 10);
@@ -132,11 +135,18 @@ if (site === "eightfold") {
   document.body.appendChild(busy);
   const wrap = document.createElement("div");
   wrap.setAttribute("role", "dialog"); wrap.setAttribute("aria-modal", "true"); wrap.className = "backdrop fade privacyAgreementDialog";
-  wrap.innerHTML = `<div class="modal"><div class="dialog-header"><h3>Data Privacy Agreement</h3></div>
+  wrap.innerHTML = q.get("notice") === "1"
+    ? `<div class="modal"><button type="button" id="close" aria-label="Close">Close</button>
+       <h3>Data Privacy Notice</h3>
+       <p>We process the personal data you provide in line with its privacy statement.</p>
+       <div><button type="button" id="cancel">Cancel</button><button type="button" id="agree" ${locked ? "disabled" : ""}>I understand</button></div></div>`
+    : `<div class="modal"><div class="dialog-header"><h3>Data Privacy Agreement</h3></div>
     <label><input type="checkbox" id="marketing"> I agree to receiving job recommendations by email</label>
     <p>Please review the consent below carefully. By continuing, you agree to the terms specified.</p>
     <div><button type="button" id="cancel">Cancel</button><button type="button" id="agree" ${locked ? "disabled" : ""}>I Agree</button></div></div>`;
   document.body.appendChild(wrap);
+  const closeBtn = wrap.querySelector("#close");
+  if (closeBtn) closeBtn.onclick = () => { st.clicks.push("close"); wrap.classList.remove("visible"); };
   let pending = null;
   const consent = (file) => {
     pending = file;
@@ -147,11 +157,13 @@ if (site === "eightfold") {
   wrap.querySelector("#cancel").onclick = () => { st.clicks.push("cancel"); wrap.classList.remove("visible"); };
   wrap.querySelector("#agree").onclick = () => {
     st.clicks.push("agree");
-    st.marketing = wrap.querySelector("#marketing").checked;
+    st.marketing = !!(wrap.querySelector("#marketing") || {}).checked;
     wrap.classList.remove("visible");
     const file = pending;
-    setTimeout(() => { bump("resume"); chip(file.name); }, 200);
+    // &notice=1: Munson's upload call starts later than the rewrite window.
+    setTimeout(() => { bump("resume"); chip(file.name); }, q.get("notice") === "1" ? 700 : 200);
   };
+  window.__open = () => wrap.classList.contains("visible");
   window.__busy = () => ({ shown: getComputedStyle(busy).visibility, spin: busy.getAnimations({ subtree: true }).map((a) => a.playState) });
   window.__clicked = (k) => st.clicks.push(k);
   mount();
@@ -168,7 +180,7 @@ if (site === "heron") {
   <button type="button">Use My Last Application</button>`;
 }
 
-window.__state = () => JSON.stringify(window.__busy ? { ...st, busy: window.__busy() } : st);
+window.__state = () => JSON.stringify(window.__busy ? { ...st, busy: window.__busy(), open: window.__open() } : st);
 </script>
 </body>
 </html>

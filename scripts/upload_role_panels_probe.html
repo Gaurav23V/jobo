@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GHO-85 role-panel upload probe</title>
+<!--
+  Southridge 2297 (the employer's own careers page, fetched 2026-10-24): one page, four
+  role panels (`section.panel[hidden]`), each with its own `form#<role>-form`
+  and a byte-identical `<input class="cv-input" type="file">` inside a
+  `div.dropzone[data-cv=<role>]`, all under the same "Apply" heading. The
+  input is a 1x1 transparent box, so it is rendered only while its panel is
+  open. On change the dropzone title shows the file name.
+    ?open=engineer   open that role's panel (default: all closed)
+-->
+<style>
+  [hidden] { display: none !important; }
+  .cv-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .dropzone { position: relative; display: flex; min-height: 92px; }
+</style>
+</head>
+<body>
+<section id="screen-choose"><h2>Pick a role</h2></section>
+<div id="shell"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const roles = ["apply", "recruiter", "engineer", "creator"];
+const st = { uploads: {}, titles: {} };
+const shell = document.getElementById("shell");
+for (const role of roles) {
+  const sec = document.createElement("section");
+  sec.id = `screen-${role}`; sec.className = "panel"; sec.hidden = q.get("open") !== role;
+  sec.innerHTML = `<h2 class="apply-head">Apply</h2><form id="${role}-form" novalidate>
+      <label class="field"><span>Full name</span><input name="name" type="text"></label>
+      <div class="field"><span class="question"><b>10</b><span>Upload your CV</span></span>
+        <div class="dropzone" data-cv="${role}" tabindex="0" aria-label="Upload your CV">
+          <input class="cv-input" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword">
+          <span class="dropzone-title">Drop your CV here</span>
+        </div></div>
+      <button type="submit">Submit</button></form>`;
+  shell.appendChild(sec);
+  const input = sec.querySelector(".cv-input");
+  input.addEventListener("change", () => {
+    if (!input.files[0]) return;
+    st.uploads[role] = (st.uploads[role] || 0) + 1;
+    sec.querySelector(".dropzone-title").textContent = input.files[0].name;
+    st.titles[role] = input.files[0].name;
+  });
+}
+window.__state = () => JSON.stringify({
+  ...st, files: Object.fromEntries(roles.map((r) => [r, document.querySelector(`#${r}-form .cv-input`).files.length])) });
+</script>
+</body>
+</html>
