@@ -1,4 +1,4 @@
-"""hCaptcha walls on an ATS's email / sign-in gate: park the job, charge nothing.
+"""Captcha walls on an ATS's email / sign-in gate or whole site: park the job, charge nothing.
 
 Measured 2026-10-18 (GHO-54). Oracle Cloud Recruiting (*.oraclecloud.com,
 Candidate Experience) and iCIMS (*.icims.com) put an INVISIBLE hCaptcha on the
@@ -23,6 +23,16 @@ clicking Submit). Paycom's challenge frame is hidden until shown and never
 reaches the accessibility snapshot (2197 spent 33 steps). The plugin cannot
 see either challenge, so on these hosts the job is parked on arrival.
 
+Measured 2026-10-23 (GHO-81): Cutshort (cutshort.io) is a Cloudflare Turnstile
+wall. After the resume reaches Cutshort's upload bucket, its save-resume step
+runs turnstile.reset() + execute(); in the jobo browser that widget hangs with
+error 300030 every ~45 s and POST /save-resume-in-user returns 401, so the
+form sits at "Reading your resume..." forever. A live retry of 1858 showed it
+in the production profile with the agent already gone, and the 22:00 run hit
+it again. Nine Cutshort jobs, none ever submitted. (A clean scratch Chromium
+got Turnstile tokens on the same sitekey, so this may be our browser's
+reputation rather than every visitor; either way the agent cannot pass it.)
+
 A challenge on any other host stays an ordinary captcha_failed.
 
 How a job gets here:
@@ -44,9 +54,15 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 
-# Keep both in sync with hermes_plugin/jobo-browser/captcha_guard.py (the
+# Keep these in sync with hermes_plugin/jobo-browser/captcha_guard.py (the
 # plugin cannot import module4); scripts/test_hcaptcha_walls.py checks it.
-SITE_WALL_HOST_SUFFIXES: tuple[str, ...] = ("paycomonline.net", "lever.co")
+# Site-wall host suffix -> the captcha it shows.
+SITE_WALLS: dict[str, str] = {
+    "paycomonline.net": "hCaptcha",
+    "lever.co": "hCaptcha",
+    "cutshort.io": "Cloudflare Turnstile",
+}
+SITE_WALL_HOST_SUFFIXES: tuple[str, ...] = tuple(SITE_WALLS)
 GATE_HOST_SUFFIXES: tuple[str, ...] = ("oraclecloud.com", "icims.com") + SITE_WALL_HOST_SUFFIXES
 
 STATUS_PREFIX = "captcha_wall:"
@@ -72,6 +88,12 @@ def is_gate_host(host: str | None) -> bool:
 
 def is_site_wall_host(host: str | None) -> bool:
     return _matches(host, SITE_WALL_HOST_SUFFIXES)
+
+
+def wall_captcha(host: str | None) -> str:
+    """The captcha a site-wall host shows ('hCaptcha' for the gate hosts)."""
+    h = (host or "").lower().rstrip(".")
+    return next((c for s, c in SITE_WALLS.items() if h == s or h.endswith("." + s)), "hCaptcha")
 
 
 def site_wall_host_for_url(url: str | None) -> str | None:
@@ -117,6 +139,9 @@ def walled_host_for_url(url: str | None, walled: set[str]) -> str | None:
 
 def pre_park_detail(host: str) -> str:
     """Why a job on `host` was parked before any agent ran."""
+    if wall_captcha(host) == "Cloudflare Turnstile":
+        return (f"Cloudflare Turnstile on {host}'s resume step never passes in the jobo browser "
+                "(error 300030, save-resume 401), so the application is never saved")
     if is_site_wall_host(host):
         return f"hCaptcha challenges every visitor at {host} before the application goes through"
     return "another job on this host is parked behind its hCaptcha sign-in wall"

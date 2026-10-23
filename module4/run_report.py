@@ -69,7 +69,7 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
          r"browser (?:session )?(?:crash|died|closed unexpectedly|disconnected)|(?:page|session|tab) crashed|target closed"
          r"|aw snap|cdp (?:connection|session) (?:lost|closed)"),
         ("site:rate_limited", "temporary", r"too many (?:attempts|requests)|rate[- ]?limit"),
-        # Parked behind an hCaptcha that every visitor meets (module4/captcha_walls.py):
+        # Parked behind a captcha wall the agent never passes (module4/captcha_walls.py):
         # nothing left to fix in code; going further is G's call (a solver service).
         ("captcha:wall_parked", "needs_g", r"\bcaptcha_wall\b"),
         # The form sat in an iframe the agent's snapshot could not read. Above

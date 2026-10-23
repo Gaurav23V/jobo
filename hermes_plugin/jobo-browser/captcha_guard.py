@@ -42,6 +42,11 @@ tree. 2134 spent 72 steps clicking Lever's Submit and 2197 33 steps on Paycom.
 So reaching a page on one of those hosts ends the run (STATUS: captcha_wall)
 before any field is filled, unless the page says the posting is closed.
 
+Cutshort (GHO-81) is the same for Cloudflare Turnstile: its save-resume step's
+widget hangs with error 300030 in the jobo browser and the save returns 401,
+so the form waits at "Reading your resume..." forever (nine jobs, none
+submitted). Turnstile shows no challenge in the snapshot either.
+
 State is per Hermes process (one agent run; a NEED_* handoff starts a new
 process, which is fine: the counters only need to stop loops inside a run).
 """
@@ -76,7 +81,12 @@ _HCAPTCHA_CONTROLS = re.compile(
 
 # Same lists as module4/captcha_walls (this plugin cannot import module4);
 # scripts/test_hcaptcha_walls.py keeps them equal.
-SITE_WALL_HOST_SUFFIXES = ("paycomonline.net", "lever.co")
+SITE_WALLS = {
+    "paycomonline.net": "hCaptcha",
+    "lever.co": "hCaptcha",
+    "cutshort.io": "Cloudflare Turnstile",
+}
+SITE_WALL_HOST_SUFFIXES = tuple(SITE_WALLS)
 GATE_HOST_SUFFIXES = ("oraclecloud.com", "icims.com") + SITE_WALL_HOST_SUFFIXES
 
 CAPTCHA_FAILED_DETAIL = "DataDome bot wall (geo.captcha-delivery.com); cannot be passed by an agent"
@@ -263,16 +273,33 @@ def hcaptcha_notice(host: str) -> str:
     )
 
 
+def site_wall_captcha(host: str) -> str:
+    h = (host or "").lower().rstrip(".")
+    return next((c for s, c in SITE_WALLS.items() if h == s or h.endswith("." + s)), "hCaptcha")
+
+
 def site_wall_notice(host: str) -> str:
-    return (
-        f"[jobo: {host} puts an hCaptcha challenge in front of every application "
-        "(tested in fresh browsers), and the agent has never passed it. The challenge "
-        "does not show in snapshots, so Submit or Continue just does nothing. Do not "
-        "fill this form. If this page says the posting is closed or not found, end with "
+    captcha = site_wall_captcha(host)
+    if captcha == "Cloudflare Turnstile":
+        why = (
+            f"[jobo: {host}'s Cloudflare Turnstile check never passes in this browser: "
+            "after the resume upload the form waits at \"Reading your resume...\" forever "
+            "(Turnstile error 300030, the save returns 401), and no Cutshort application "
+            "has ever gone through. Do not sign in, upload or fill anything. "
+        )
+    else:
+        why = (
+            f"[jobo: {host} puts an hCaptcha challenge in front of every application "
+            "(tested in fresh browsers), and the agent has never passed it. The challenge "
+            "does not show in snapshots, so Submit or Continue just does nothing. Do not "
+            "fill this form. "
+        )
+    return why + (
+        "If this page says the posting is closed or not found, end with "
         "STATUS: closed as usual. Otherwise this job is parked and costs no attempt. "
         "End NOW with:\n"
         "STATUS: captcha_wall\n"
-        f"DETAIL: hCaptcha wall at {host}\n"
+        f"DETAIL: {captcha} wall at {host}\n"
         "FIELDS_FILLED_JSON: {}]"
     )
 

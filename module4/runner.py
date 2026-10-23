@@ -1065,16 +1065,18 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 if route.kind == linkedin_router.EXTERNAL and not force else None
             )
             if site_wall:
-                # Applies on a site that challenges every visitor (GHO-73):
-                # park it here instead of handing it to a form agent.
+                # Applies on a site whose captcha the agent never passes
+                # (GHO-73, GHO-81): park it here instead of handing it to a
+                # form agent.
                 persist.mark_status(
                     session, job,
                     captcha_walls.status_for(site_wall, captcha_walls.pre_park_detail(site_wall)),
                     dry_run=dry_run,
                 )
+                wall = f"{captcha_walls.wall_captcha(site_wall)} wall on {site_wall}"
                 result.captcha_parked += 1
-                result.details.append(f"job_id={jid}: PARKED when routed, hCaptcha wall on {site_wall}")
-                logger.info("[%s] Parked when routed (no attempt charged): hCaptcha wall on %s.", jid, site_wall)
+                result.details.append(f"job_id={jid}: PARKED when routed, {wall}")
+                logger.info("[%s] Parked when routed (no attempt charged): %s.", jid, wall)
             elif route.kind == linkedin_router.EXTERNAL and google_forms.find_form_url(route.apply_url) is None:
                 worker.hand_off(jid, "form", route.apply_url, f"external: {route.reason}")
                 result.routed_form += 1

@@ -27,7 +27,7 @@ _PERMANENT_STATUSES = {
     # Captcha solving is only available as a paid cloud service; the agent
     # cannot pass these, and a retry meets the same challenge.
     "captcha_failed",
-    # Only when it names no gate host (Oracle Cloud, iCIMS, Paycom, Lever): those are parked by the
+    # Only when it names no gate host (Oracle Cloud, iCIMS, Paycom, Lever, Cutshort): those are parked by the
     # runner before this is asked (module4/captcha_walls.py).
     "captcha_wall",
 }

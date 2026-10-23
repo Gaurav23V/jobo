@@ -70,9 +70,9 @@ VALID_STATUSES = {
     # Not a failure either: no attempt is charged and the job comes back once
     # the site is un-paused.
     "paused_site",
-    # An hCaptcha challenge meets every visitor: on the email/sign-in step of
-    # an Oracle Cloud or iCIMS site, or anywhere on a Paycom / Lever site
-    # (module4/captcha_walls.py). Only the plugin's notice asks for it; the
+    # A captcha the agent never passes: hCaptcha on the email/sign-in step of
+    # an Oracle Cloud or iCIMS site or anywhere on a Paycom / Lever site, or
+    # Cutshort's Cloudflare Turnstile (module4/captcha_walls.py). Only the plugin's notice asks for it; the
     # job is parked, no attempt charged.
     "captcha_wall",
     # LinkedIn shows the shared apply browser as signed out. A PIPELINE

@@ -15,6 +15,10 @@ scratch profile, so they are site walls: parked on arrival, or before any
 agent. paycom_guest_dialog.json and lever_apply_enclave.json have the shape of
 those runs' results with employer names and ids replaced.
 
+GHO-81, 2026-10-23: Cutshort's resume step hangs on Cloudflare Turnstile
+(error 300030, save-resume 401) in the jobo browser; nine jobs, none submitted.
+cutshort.io is a site wall too, with a Turnstile notice and park detail.
+
 Offline: temporary SQLite DB, no browser, no model calls.
 
     uv run python scripts/test_hcaptcha_walls.py
@@ -46,6 +50,7 @@ ORACLE = "contoso.fa.oraclecloud.com"
 ICIMS = "careers-fabrikam.icims.com"
 PAYCOM = "www.paycomonline.net"
 LEVER = "jobs.lever.co"
+CUTSHORT = "cutshort.io"
 OTHER = "boards.greenhouse.io"  # any host outside captcha_walls
 
 PASS = 0
@@ -347,6 +352,68 @@ def test_router_park():
     check("counted as captcha_parked", res.captcha_parked == 1, str(res.captcha_parked))
 
 
+def test_cutshort_turnstile():
+    print("\n[12] GHO-81: Cutshort's Turnstile is a site wall: guard, router and verdict park it")
+    from module4 import apply_queue, linkedin_router, parallel
+
+    job_page = f"https://{CUTSHORT}/job/Software-Engineer-Backend-Remote-Contoso-AbC123?utm_source=linkedin-feed"
+    g = _load("jobo_turnstile_site_guard_test", PLUGIN_DIR / "captcha_guard.py")
+    g.reset_state()
+    page = {"url": job_page, "snapshot": '- heading "Software Engineer (Backend)" [level=1]\n- button "Apply" [ref=e3]'}
+    seen = g.observe("browser_navigate", json.dumps(page))
+    check("a Cutshort job page ends the run as captcha_wall before sign-in or upload",
+          bool(seen) and "STATUS: captcha_wall" in seen[1]
+          and f"DETAIL: Cloudflare Turnstile wall at {CUTSHORT}" in seen[1], seen and seen[1])
+    check("the notice names Turnstile, not hCaptcha", bool(seen) and "hCaptcha" not in seen[1], seen and seen[1])
+    check("closed postings still end as closed", bool(seen) and "STATUS: closed" in seen[1])
+    g.reset_state()
+    seen = g.observe("browser_navigate", json.dumps(dict(page, url=f"https://www.{CUTSHORT}/profile/create-signal")))
+    check("www. and the profile pages too", bool(seen) and "STATUS: captcha_wall" in seen[1], seen and seen[1])
+    check("look-alikes are no wall", not captcha_walls.is_site_wall_host("notcutshort.io.example"))
+    check("Paycom and Lever notices are unchanged", "hCaptcha wall at jobs.lever.co" in g.site_wall_notice(LEVER))
+
+    v = agent_driver.parse_verdict(
+        f"STATUS: captcha_wall\nDETAIL: Cloudflare Turnstile wall at {CUTSHORT}\nFIELDS_FILLED_JSON: {{}}")
+    check("the verdict the notice asks for is a park", v.status == "captcha_wall"
+          and blockers.permanent_reason(v.status, v.detail) is None, v.status)
+    s = _session()
+    j = _job(s, 1858, "https://www.linkedin.com/jobs/view/1858/")
+    _, spawned = _run(s, v)
+    s.refresh(j)
+    check("an agent that lands on Cutshort parks the job, no attempt charged",
+          spawned == [1858] and (j.module4_last_status or "").startswith(f"captcha_wall:{CUTSHORT} |")
+          and not j.module4_attempts and j.should_apply is True, f"{spawned} {j.module4_last_status} {j.module4_attempts}")
+    check("run-report files it under captcha:wall_parked, not captcha:turnstile",
+          run_report.signature_for(j.module4_last_status) == "captcha:wall_parked", j.module4_last_status)
+
+    tmp = Path(tempfile.mkdtemp(prefix="gho81_"))
+    engine = create_engine(f"sqlite:///{tmp}/jobs.db", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    s2 = sessionmaker(bind=engine)()
+    j2 = _job(s2, 1711, "https://www.linkedin.com/jobs/view/1711/")
+    q = apply_queue.ApplyQueue("test_gho81", path=tmp / "queue.sqlite")
+    q.create_run([(1711, "Contoso")])
+    li = parallel.Worker("li", parallel.ROLE_LINKEDIN, q, form_workers=1, poll_sec=0.01)
+    q.register_worker("f1", parallel.ROLE_FORM, None, None)
+    route = linkedin_router.Route(linkedin_router.EXTERNAL, job_page, "ext")
+
+    def resolve(cdp, url):
+        q.worker_done("f1")
+        return route
+
+    with patch.object(linkedin_router, "resolve", side_effect=resolve):
+        res, spawned = _run(s2, agent_driver.ApplyOutcome("submitted", "submitted"), worker=li)
+    s2.refresh(j2)
+    check("router: a LinkedIn listing applying on Cutshort is parked, no agent", spawned == [], str(spawned))
+    check("router: parked on cutshort.io with the Turnstile detail, uncharged",
+          (j2.module4_last_status or "").startswith(f"captcha_wall:{CUTSHORT} |")
+          and "Turnstile" in j2.module4_last_status and not j2.module4_attempts, j2.module4_last_status)
+    check("router: not handed to a form worker",
+          q.pending(apply_queue.ROUTE_FORM) == 0 and res.routed_form == 0 and res.captcha_parked == 1)
+    check("router: the run detail names Turnstile",
+          any("Cloudflare Turnstile wall on cutshort.io" in d for d in res.details), str(res.details))
+
+
 def main() -> int:
     test_guard()
     test_verdict_and_rules()
@@ -354,6 +421,7 @@ def main() -> int:
     test_site_wall_guard()
     test_site_wall_runner()
     test_router_park()
+    test_cutshort_turnstile()
     print(f"\n{PASS}/{PASS + FAIL} passed")
     return 1 if FAIL else 0
 
