@@ -736,6 +736,21 @@ that way: never open linkedin.com. If the employer's site will only continue thr
     DETAIL: employer site requires LinkedIn - hand back to the LinkedIn worker
 and the job is moved to the signed-in browser without being charged."""
 
+    account_note = ""
+    from urllib.parse import urlsplit
+
+    site = (urlsplit(url or "").hostname or "").lower()
+    recorded = personal.site_password(site)
+    if recorded:
+        # Wingtip 1481 (2026-10-23): the portal kept the password an earlier
+        # run set and refuses the standard one, on sign-in and on reset.
+        account_note = f"""
+
+EXISTING ACCOUNT: {site} already has an account for {CANDIDATE_EMAIL}, set up by
+an earlier jobo run with the password {recorded}. On this portal, sign in with
+{CANDIDATE_EMAIL} / {recorded} (not {ACCOUNT_PASSWORD}), and never request a
+password reset here: the portal refuses to reuse a recent password."""
+
     return f"""Apply to this job now.
 
 job_id: {job_id}
@@ -746,7 +761,7 @@ resume_pdf: {resume_path}
 resume_upload_name: {upload_name} (the only resume this application may carry; upload it with NEED_UPLOAD, never pick a saved one)
 cover_letter_pdf: {cover_path or "(none - skip cover letter uploads)"}
 step_budget: {step_budget or "limited"} model steps for this whole job, handoff rounds included
-{retry_note}{form_note}
+{retry_note}{form_note}{account_note}
 
 The page may already be open in the browser; if not, navigate to the url.
 Remember: end with STATUS: and DETAIL: lines."""

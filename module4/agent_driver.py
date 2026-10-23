@@ -21,6 +21,7 @@ import secrets
 import shutil
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -1115,10 +1116,13 @@ def _enforce_account_password(
     that way is one no later run can sign in to. The intended policy
     (password_reset.py) is ONE known password everywhere, so a
     later run signs in instead of resetting again.
+
+    The exception is a portal listed in secrets.json `site_passwords`: an
+    earlier run already set a different password there (Wingtip 929), so that
+    one is the password its fields get.
     """
     from module4 import password_reset
 
-    standard = password_reset.STANDARD_PASSWORD
     try:
         listed = form_filler.listed_field(cdp_url, index)
     except Exception:
@@ -1129,14 +1133,23 @@ def _enforce_account_password(
     )
     if not is_password or re.search(r"forgot|reset link|strength", label or field_hint, re.I):
         return value, ""
+    site, recorded = _recorded_site_password(cdp_url, form_filler)
+    standard = recorded or password_reset.STANDARD_PASSWORD
     if not standard or value == standard:
         return value, ""
     logger.warning(
         "[%s] Password field %s: replacing an agent-chosen password with the "
-        "pipeline's standard one.",
+        "%s.",
         job_id,
         f"#{index}" if index else repr(field_hint),
+        f"one recorded for {site}" if recorded else "pipeline's standard one",
     )
+    if recorded:
+        return standard, (
+            f"NOTE: the account on {site} already exists and an earlier run set its "
+            f"password to {standard}, so this field was set to {standard} instead of "
+            "the value you gave. Sign in with it; do not reset it or try others."
+        )
     return standard, (
         f"NOTE: account passwords are never invented. This field was set to the "
         f"pipeline's standard password {standard} instead of the value you gave. "
@@ -1144,6 +1157,22 @@ def _enforce_account_password(
         "sign-in on this portal. If the portal rejects it, report STATUS: stuck "
         "quoting its password rule; do not try other passwords."
     )
+
+
+def _recorded_site_password(cdp_url: str, form_filler) -> tuple[str, str]:
+    """(host, password) when an open tab is on a `site_passwords` portal."""
+    if not personal.site_passwords():
+        return "", ""
+    try:
+        tabs = form_filler._page_targets(cdp_url)
+    except Exception:
+        return "", ""
+    for tab in tabs:
+        host = (urllib.parse.urlsplit(str(tab.get("url") or "")).hostname or "").lower()
+        recorded = personal.site_password(host)
+        if recorded:
+            return host, recorded
+    return "", ""
 
 
 def _easy_apply_submit_refusal(label: str, *, cdp_url: str, job_id: int) -> str:
@@ -1277,6 +1306,20 @@ def _resolve_password_reset(line: str, *, job_id: int) -> str:
         return f"PASSWORD_RESET_REFUSED: {_ACCOUNT_SIGNIN_REFUSAL}"
 
     logger.info("[%s] Agent requested a password reset for %s.", job_id, domain)
+    recorded = personal.site_password(domain)
+    if recorded:
+        # Wingtip 1481 (2026-10-23): five runs reset this account to the
+        # standard password, which the portal refuses as one of the last 3,
+        # while the password set by Wingtip 929 on 2026-09-18 still worked.
+        logger.info("[%s] %s has a recorded account password; no reset.", job_id, domain)
+        return (
+            f"PASSWORD_RESET_NOT_NEEDED: the account on {domain} for {personal.email()} "
+            f"was set up by an earlier jobo run with the password {recorded}. Do not "
+            "open any reset link and do not request another reset. Go to the portal's "
+            f"normal sign-in page, sign in with {personal.email()} / {recorded}, and "
+            "continue the application. If that sign-in is refused, report STATUS: stuck "
+            "quoting the portal's message."
+        )
     # The mail needs a moment to land; the agent has just clicked "forgot
     # password" in the same turn it printed the directive.
     time.sleep(PASSWORD_RESET_WAIT_SEC)

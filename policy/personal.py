@@ -159,6 +159,36 @@ def account_password() -> str:
     return str(_load_json(str(path(SECRETS_FILE))).get("account_password", "") or "")
 
 
+def site_passwords() -> dict[str, str]:
+    """Hosts whose existing account has a password other than account_password().
+
+    ``site_passwords`` in secrets.json maps a host to the password an earlier
+    jobo run set there before the one-password rule (Wingtip 929, 2026-09-18,
+    reset that account to a variant). Such a portal refuses to take the
+    standard password back ("must differ from your previous 3 passwords"), so
+    the recorded one is the only way in. Never log or print the values.
+    """
+    raw = _load_json(str(path(SECRETS_FILE))).get("site_passwords")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(host).lower().strip(" ."): str(pw)
+        for host, pw in raw.items()
+        if "." in str(host).strip(" .") and pw
+    }
+
+
+def site_password(host: str) -> str:
+    """The recorded password for `host` (or a parent/child of it), else ""."""
+    host = (host or "").lower().strip(" .")
+    if "." not in host:
+        return ""
+    for site, pw in site_passwords().items():
+        if host == site or host.endswith("." + site) or site.endswith("." + host):
+            return pw
+    return ""
+
+
 def reload() -> None:
     """Forget cached files (tests and setup use this after writing new ones)."""
     _load_json.cache_clear()

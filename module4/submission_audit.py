@@ -33,6 +33,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from policy import personal
+
 logger = logging.getLogger(__name__)
 
 AUDIT_DIR = Path(__file__).parent.parent / "data" / "logs" / "apply_audit"
@@ -50,15 +52,18 @@ def _redact_passwords(fields: dict) -> dict:
     try:
         from module4 import password_reset
 
-        secret = password_reset.STANDARD_PASSWORD or ""
+        known = [password_reset.STANDARD_PASSWORD or ""]
     except Exception:  # pragma: no cover - personal data missing
-        secret = ""
+        known = []
+    known = [pw for pw in known + list(personal.site_passwords().values()) if pw]
     out = {}
     for key, value in fields.items():
         if _PASSWORD_KEY.search(str(key)) and value:
             out[key] = REDACTED
-        elif secret and isinstance(value, str) and secret in value:
-            out[key] = value.replace(secret, REDACTED)
+        elif isinstance(value, str) and any(pw in value for pw in known):
+            for pw in known:
+                value = value.replace(pw, REDACTED)
+            out[key] = value
         else:
             out[key] = value
     return out

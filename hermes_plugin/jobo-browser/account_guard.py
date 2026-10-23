@@ -26,6 +26,9 @@ result), so the destructive call never reaches the browser:
     the agent is told to report STATUS: linkedin_signed_out.
   * browser_type: a password-shaped value that is not the pipeline's standard
     account password is refused (Wingtip job 818 typed three invented passwords).
+    On a host listed in secrets.json `site_passwords` the expected password is
+    the one recorded there (Wingtip 929 set a variant on 2026-09-18 that the
+    portal will not let us change back).
 
 Everything fails OPEN on unexpected input (a guard bug must not break every
 tool call), but every rule that matches fails CLOSED.
@@ -41,18 +44,15 @@ import os
 from pathlib import Path
 
 
-def _load_standard_password() -> str:
-    """The pipeline's one job-site password, from the candidate's local config.
+def _load_secrets() -> dict:
+    """secrets.json from the candidate's local config.
 
     Same lookup as policy/personal.py (asserted equal by
-    scripts/test_linkedin_session.py): JOBO_ACCOUNT_PASSWORD, else
-    secrets.json in JOBO_PERSONAL_DIR or <repo>/personal/. The plugin runs
-    inside the Hermes process, which cannot import the jobo package, so the
-    repo is found from this file's real (symlink-resolved) location.
+    scripts/test_linkedin_session.py): JOBO_PERSONAL_DIR or <repo>/personal/.
+    The plugin runs inside the Hermes process, which cannot import the jobo
+    package, so the repo is found from this file's real (symlink-resolved)
+    location.
     """
-    env = os.environ.get("JOBO_ACCOUNT_PASSWORD", "")
-    if env:
-        return env
     repo = Path(__file__).resolve().parents[2]
     raw = os.environ.get("JOBO_PERSONAL_DIR", "").strip()
     if raw:
@@ -64,13 +64,33 @@ def _load_standard_password() -> str:
         pdir = repo / "personal.example"
     try:
         data = json.loads((pdir / "secrets.json").read_text(encoding="utf-8"))
-        return str(data.get("account_password") or "")
-    except (OSError, ValueError, AttributeError):
-        return ""
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_standard_password() -> str:
+    """The pipeline's one job-site password: JOBO_ACCOUNT_PASSWORD, else secrets.json."""
+    return os.environ.get("JOBO_ACCOUNT_PASSWORD", "") or str(
+        _load_secrets().get("account_password") or ""
+    )
+
+
+def _load_site_passwords() -> dict[str, str]:
+    """Same as policy.personal.site_passwords()."""
+    raw = _load_secrets().get("site_passwords")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(host).lower().strip(" ."): str(pw)
+        for host, pw in raw.items()
+        if "." in str(host).strip(" .") and pw
+    }
 
 
 # Keep equal to module4.password_reset.STANDARD_PASSWORD. Never log it.
 STANDARD_PASSWORD = _load_standard_password()
+SITE_PASSWORDS = _load_site_passwords()
 
 SIGNED_OUT_STATUS = "linkedin_signed_out"
 
@@ -129,12 +149,13 @@ _GUEST_MARKERS = (
 
 PASSWORD_SHAPE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S{8,64}$")
 
-_state = {"linkedin_signed_out": False, "where": ""}
+_state = {"linkedin_signed_out": False, "where": "", "host": ""}
 
 
 def reset_state() -> None:
     _state["linkedin_signed_out"] = False
     _state["where"] = ""
+    _state["host"] = ""
 
 
 def _host(url: str) -> str:
@@ -204,7 +225,40 @@ def _msg_signed_out(where: str) -> str:
     )
 
 
+def site_password(host: str) -> str:
+    """Same match as policy.personal.site_password()."""
+    host = (host or "").lower().strip(" .")
+    if "." not in host:
+        return ""
+    for site, pw in SITE_PASSWORDS.items():
+        if host == site or host.endswith("." + site) or site.endswith("." + host):
+            return pw
+    return ""
+
+
+def expected_password() -> str:
+    """The password a password field on the current page should get."""
+    return site_password(_state["host"]) or STANDARD_PASSWORD
+
+
+def _known_password(text: str) -> bool:
+    """`text` is the password this page expects. Each handoff turn is a fresh
+    Hermes process, so before its first navigate/snapshot the host is unknown
+    and any recorded site password counts as known too."""
+    if not text:
+        return False
+    if text == expected_password():
+        return True
+    return not _state["host"] and text in SITE_PASSWORDS.values()
+
+
 def _msg_password() -> str:
+    if site_password(_state["host"]):
+        return (
+            f"BLOCKED by jobo: the account on {_state['host']} already exists and an "
+            f"earlier run set its password to {expected_password()}. Sign in with "
+            f"exactly that password; do not invent another or reset it."
+        )
     return (
         "BLOCKED by jobo: that looks like a made-up password. Account passwords are "
         f"never invented: type exactly {STANDARD_PASSWORD} in BOTH the password and "
@@ -259,7 +313,7 @@ def check_tool_call(tool_name: str, args: dict | None) -> str | None:
 
     if name == "browser_type":
         text = str(a.get("text") or "")
-        if (STANDARD_PASSWORD and text == STANDARD_PASSWORD) or is_password_ref(a.get("ref")):
+        if text == STANDARD_PASSWORD or _known_password(text) or is_password_ref(a.get("ref")):
             return None  # a known password field is rewritten by password_rewrite()
         if _looks_invented_password(text):
             return _msg_password()
@@ -309,9 +363,10 @@ def password_rewrite(tool_name: str, args: dict | None) -> dict | None:
     a = args if isinstance(args, dict) else {}
     if tool_name != "browser_type" or not is_password_ref(a.get("ref")):
         return None
-    if not STANDARD_PASSWORD or str(a.get("text") or "") == STANDARD_PASSWORD:
+    want = expected_password()
+    if not want or _known_password(str(a.get("text") or "")):
         return None
-    return {"text": STANDARD_PASSWORD}
+    return {"text": want}
 
 
 def _result_url(data: dict) -> str:
@@ -342,6 +397,8 @@ def observe_result(tool_name: str, result) -> str | None:
     url = _result_url(data)
     if not url:
         return None
+    if not is_linkedin_url(url) and _host(url):
+        _state["host"] = _host(url)
     snap = raw_snap.lower()
     if is_account_auth_url(url) or (
         is_linkedin_url(url) and any(m in snap for m in _GUEST_MARKERS)

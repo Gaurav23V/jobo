@@ -135,7 +135,7 @@ def _pre_tool_call(tool_name=None, args=None, task_id=None, api_request_id=None,
             return {"action": "block", "message": message}
         rewrite = account_guard.password_rewrite(tool_name or "", args)
         if rewrite:
-            logger.info("jobo-browser account guard: password field gets the standard password")
+            logger.info("jobo-browser account guard: password field gets the account's known password")
             return {"action": "modify", "args": rewrite}
     except Exception as e:  # fail open: a guard bug must not break every tool
         logger.warning("jobo-browser guard skipped: %s", e)
