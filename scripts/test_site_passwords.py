@@ -16,7 +16,7 @@ secrets.json `site_passwords` records that host's password. Covers:
       host; NEED_PASSWORD_RESET for that host is answered with "sign in"
       and never reads the mailbox
   [4] prompt names the recorded password for that host only
-  [5] audit redacts the recorded password
+  [5] audit and verdict detail redact the recorded and standard passwords
 
 Offline. Run via
     bash scripts/run_regression_tests.sh test_site_passwords
@@ -177,6 +177,23 @@ def test_audit():
     print("\n[5] audit redaction")
     out = submission_audit._redact_passwords({"Account": f"signed in with {KNOWN}", "Name": "Alex"})
     check("recorded password redacted", KNOWN not in json.dumps(out) and out["Name"] == "Alex", str(out)[:60])
+
+    # 1481's live retry, 2026-10-24 02:39: the DETAIL line named the password.
+    std = password_reset.STANDARD_PASSWORD
+    verdict = agent_driver.parse_verdict(
+        "STATUS: submitted\n"
+        f"DETAIL: Submitted via {HOST} after signing in with the existing account "
+        f"(reset password {KNOWN}; old {std}); confirmation page shown.\n"
+        'FIELDS_FILLED_JSON: {"Name": "Alex"}\n')
+    check("verdict detail scrubs recorded and standard passwords",
+          verdict.status == "submitted" and KNOWN not in verdict.detail and std not in verdict.detail
+          and "confirmation page shown" in verdict.detail, verdict.detail[-60:])
+    with tempfile.TemporaryDirectory() as d, patch.object(submission_audit, "AUDIT_DIR", Path(d)):
+        path = submission_audit.write_audit_record(
+            job_id=1481, company="Wingtip", title="Data Engineer", url=f"https://{HOST}/", status="submitted",
+            detail=f"signed in with {KNOWN}", fields_filled={}, resume_path="/nonexistent.pdf",
+            cover_path=None, attempt_number=1)
+        check("audit detail redacted", path is not None and KNOWN not in path.read_text())
 
 
 def main() -> int:

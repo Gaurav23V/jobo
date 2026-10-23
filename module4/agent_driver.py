@@ -26,7 +26,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from module4 import captcha_walls, email_apply
+from module4 import captcha_walls, email_apply, submission_audit
 from policy import personal
 
 logger = logging.getLogger(__name__)
@@ -567,8 +567,8 @@ def parse_verdict(text: str) -> ApplyOutcome:
         except json.JSONDecodeError:
             logger.warning("FIELDS_FILLED_JSON present but not valid JSON, dropping.")
 
-    return ApplyOutcome(status=status, detail=detail, fields_filled=fields_filled,
-                        email_mailto=email_mailto)
+    return ApplyOutcome(status=status, detail=submission_audit.scrub_passwords(detail),
+                        fields_filled=fields_filled, email_mailto=email_mailto)
 
 
 def _dump_debug_transcript(job_id: int, raw_output: str) -> None:

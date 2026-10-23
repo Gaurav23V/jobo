@@ -44,18 +44,33 @@ _PASSWORD_KEY = re.compile(r"pass\s*word|passcode|\bpwd\b", re.I)
 REDACTED = "[redacted]"
 
 
-def _redact_passwords(fields: dict) -> dict:
-    """The agent's report lists the account password it typed (Workday
-    2219, GHO-78). Keep the field, never the value."""
-    if not isinstance(fields, dict):
-        return fields
+def _known_passwords() -> list[str]:
     try:
         from module4 import password_reset
 
         known = [password_reset.STANDARD_PASSWORD or ""]
     except Exception:  # pragma: no cover - personal data missing
         known = []
-    known = [pw for pw in known + list(personal.site_passwords().values()) if pw]
+    return [pw for pw in known + list(personal.site_passwords().values()) if pw]
+
+
+def scrub_passwords(text: str) -> str:
+    """The agent's DETAIL line names the password it signed in with (Wingtip
+    1481, GHO-62: "signed in ... (reset password <recorded>)"). That line goes
+    to the DB, the run log, the audit and from there into run reviews."""
+    if not text:
+        return text
+    for pw in _known_passwords():
+        text = text.replace(pw, REDACTED)
+    return text
+
+
+def _redact_passwords(fields: dict) -> dict:
+    """The agent's report lists the account password it typed (Workday
+    2219, GHO-78). Keep the field, never the value."""
+    if not isinstance(fields, dict):
+        return fields
+    known = _known_passwords()
     out = {}
     for key, value in fields.items():
         if _PASSWORD_KEY.search(str(key)) and value:
@@ -109,7 +124,7 @@ def write_audit_record(
             "attempt_number": attempt_number,
             "recorded_at": datetime.now().isoformat(),
             "status": status,
-            "detail": detail,
+            "detail": scrub_passwords(detail),
             "fields_filled_by_agent": _redact_passwords(fields_filled),
             "resume_pdf_path": resume_path,
             "resume_pdf_hash": _sha256_file(resume_path),
