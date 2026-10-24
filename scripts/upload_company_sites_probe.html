@@ -20,6 +20,10 @@
                       tab, the live headed workers did not.
                       &notice=1 is Munson 2623 (GHO-85): the dialog is a
                       "Data Privacy Notice" with Close / Cancel / I understand.
+                      &notice=2 is Applied Materials 1929 (GHO-88): a "Data
+                      Privacy Agreement" with Close / Cancel / Confirm.
+                      &notice=3 is the same dialog shape titled "Submit your
+                      application?": a Confirm that is not a consent.
     ?site=heron        Heron 1648: a cookie banner over a Workday start page with
                       an "Autofill with Resume" button and no file input.
     ?site=twins       two inputs nothing tells apart.
@@ -135,11 +139,14 @@ if (site === "eightfold") {
   document.body.appendChild(busy);
   const wrap = document.createElement("div");
   wrap.setAttribute("role", "dialog"); wrap.setAttribute("aria-modal", "true"); wrap.className = "backdrop fade privacyAgreementDialog";
-  wrap.innerHTML = q.get("notice") === "1"
+  const notice = { "1": ["Data Privacy Notice", "We process the personal data you provide in line with its privacy statement.", "I understand"],
+                   "2": ["Data Privacy Agreement", "We process the personal data you provide in line with its privacy statement.", "Confirm"],
+                   "3": ["Submit your application?", "By submitting you agree to the terms of use.", "Confirm"] }[q.get("notice")];
+  wrap.innerHTML = notice
     ? `<div class="modal"><button type="button" id="close" aria-label="Close">Close</button>
-       <h3>Data Privacy Notice</h3>
-       <p>We process the personal data you provide in line with its privacy statement.</p>
-       <div><button type="button" id="cancel">Cancel</button><button type="button" id="agree" ${locked ? "disabled" : ""}>I understand</button></div></div>`
+       <h3>${notice[0]}</h3>
+       <p>${notice[1]}</p>
+       <div><button type="button" id="cancel">Cancel</button><button type="button" id="agree" ${locked ? "disabled" : ""}>${notice[2]}</button></div></div>`
     : `<div class="modal"><div class="dialog-header"><h3>Data Privacy Agreement</h3></div>
     <label><input type="checkbox" id="marketing"> I agree to receiving job recommendations by email</label>
     <p>Please review the consent below carefully. By continuing, you agree to the terms specified.</p>
@@ -161,7 +168,7 @@ if (site === "eightfold") {
     wrap.classList.remove("visible");
     const file = pending;
     // &notice=1: Munson's upload call starts later than the rewrite window.
-    setTimeout(() => { bump("resume"); chip(file.name); }, q.get("notice") === "1" ? 700 : 200);
+    setTimeout(() => { bump("resume"); chip(file.name); }, notice ? 700 : 200);
   };
   window.__open = () => wrap.classList.contains("visible");
   window.__busy = () => ({ shown: getComputedStyle(busy).visibility, spin: busy.getAnimations({ subtree: true }).map((a) => a.playState) });

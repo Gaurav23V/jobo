@@ -1845,6 +1845,11 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
 # without such a button is reported to the agent instead.
 # Munson's Eightfold site (2623, GHO-85) names it "Data Privacy Notice" and
 # answers with "I understand" (beside Close / Cancel); that is the same accept.
+# Applied Materials (1929, GHO-88) keeps the "Data Privacy Agreement" title but
+# answers with a bare "Confirm" (beside Close / Cancel). A bare Confirm / OK /
+# Continue says nothing about consent by itself (a "Submit your application?"
+# dialog mentioning terms has one too), so it is the accept only when the
+# dialog's title names privacy/consent/data protection.
 # Live (19:18 run, 1745/1757, GHO-26) the dialog was never found: the dialog
 # fades in through CSS transitions on opacity/visibility, and the form-worker
 # pages were hidden (Wayland windows GNOME suspends when covered, minimized or
@@ -1856,8 +1861,11 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
 _CONSENT_TEXT_RE = r"privacy|consent|data protection|terms|agree"
 _CONSENT_BUTTON_RE = (r"^(?:yes,?\s*)?(?:i\s+)?(?:agree|accept|consent|understand)"
                       r"(?:\s+(?:and|&)\s+(?:continue|proceed|upload))?$")
-_CONSENT_JS = r"""function(textRe, btnRe){
+_CONSENT_TITLE_RE = r"privacy|consent|data protection"
+_CONSENT_PLAIN_BUTTON_RE = r"^(?:confirm|ok|okay|continue)$"
+_CONSENT_JS = r"""function(textRe, btnRe, titleRe, plainRe){
   const tRe = new RegExp(textRe, 'i'), bRe = new RegExp(btnRe, 'i');
+  const hRe = new RegExp(titleRe, 'i'), pRe = new RegExp(plainRe, 'i');
   const vis = (e) => {
     const r = e.getBoundingClientRect(), s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
@@ -1883,7 +1891,8 @@ _CONSENT_JS = r"""function(textRe, btnRe){
     const btns = [...d.querySelectorAll('button,[role=button],input[type=button],input[type=submit]')].filter(vis);
     const head = d.querySelector('h1,h2,h3,h4,[role=heading],[class*=title i],[class*=header i]');
     const title = ((head && head.innerText) || text).replace(/\s+/g, ' ').trim().slice(0, 60);
-    const agree = btns.find((b) => bRe.test(label(b)) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+    const accepts = (b) => bRe.test(label(b)) || (hRe.test(title) && pRe.test(label(b)));
+    const agree = btns.find((b) => accepts(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
     if (agree) agree.click();
     return JSON.stringify({title, clicked: agree ? label(agree) : '', buttons: btns.map(label).filter(Boolean).slice(0, 6)});
   }
@@ -1895,7 +1904,8 @@ def _answer_consent(cdp: _Cdp) -> str:
     """Accept a consent dialog the write opened; '' when there is none."""
     try:
         res = _checked(cdp, "Runtime.evaluate", {
-            "expression": f"({_CONSENT_JS})({json.dumps(_CONSENT_TEXT_RE)}, {json.dumps(_CONSENT_BUTTON_RE)})",
+            "expression": f"({_CONSENT_JS})({json.dumps(_CONSENT_TEXT_RE)}, {json.dumps(_CONSENT_BUTTON_RE)}, "
+                          f"{json.dumps(_CONSENT_TITLE_RE)}, {json.dumps(_CONSENT_PLAIN_BUTTON_RE)})",
             "returnByValue": True})
         raw = res.get("result", {}).get("value") or ""
     except Exception:

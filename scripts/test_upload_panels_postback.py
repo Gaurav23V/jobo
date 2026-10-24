@@ -14,6 +14,10 @@
 * Munson 2623 (Eightfold): the upload waits on a "Data Privacy Notice"
   (Close | Cancel | I understand); only agree/accept were clicked. Page:
   scripts/upload_company_sites_probe.html?site=eightfold&notice=1.
+* Applied Materials 1929 (Eightfold, GHO-88): the same dialog titled "Data
+  Privacy Agreement" answers with a bare "Confirm" (Close | Cancel | Confirm);
+  a Confirm is accepted only under a privacy/consent title (&notice=2, and
+  &notice=3 for a "Submit your application?" Confirm that must stay unclicked).
 
 Self-isolated: own headless Chromium on a random port (never 9333).
 Run: bash scripts/run_regression_tests.sh test_upload_panels_postback
@@ -257,10 +261,39 @@ def _munson() -> None:
           not res.ok and st["clicks"] == [] and "Cancel | I understand" in res.detail, res.detail[-120:])
 
 
+def _applied() -> None:
+    print("\nApplied Materials 1929 (Eightfold, GHO-88): Data Privacy Agreement with Close | Cancel | Confirm")
+    res, st = run(SITES.as_uri() + "?site=eightfold&notice=2", "", settle=1.0)
+    check("upload succeeds after the agreement is confirmed",
+          res.ok and st["uploads"] == {"resume": 1} and st["chips"] == [RESUME.name],
+          f"ok={res.ok} uploads={st['uploads']} {res.detail[:60]}")
+    check("only 'Confirm' was clicked (not Close, not Cancel)", st["clicks"] == ["agree"],
+          f"clicks={st['clicks']}")
+    check("one write: no second write reopened the agreement", st.get("changes") == 1 and not st.get("open"),
+          f"changes={st.get('changes')} open={st.get('open')}")
+    check("the agent is told the agreement was accepted",
+          'accepted the site\'s "Data Privacy Agreement" dialog ("Confirm")' in res.detail, res.detail[-120:])
+    res, st = run(SITES.as_uri() + "?site=eightfold&notice=2&locked=1", "")
+    check("disabled 'Confirm' -> UPLOAD_FAILED naming the buttons",
+          not res.ok and st["clicks"] == [] and "Cancel | Confirm" in res.detail, res.detail[-120:])
+    res, st = run(SITES.as_uri() + "?site=eightfold&notice=3", "")
+    check("a Confirm under a non-privacy title ('Submit your application?') is never clicked",
+          not res.ok and st["clicks"] == [] and "Cancel | Confirm" in res.detail, res.detail[-120:])
+    title = re.compile(uploader._CONSENT_TITLE_RE, re.I)
+    plain = re.compile(uploader._CONSENT_PLAIN_BUTTON_RE, re.I)
+    check("bare accept labels: Confirm / OK / Continue only",
+          all(plain.search(x) for x in ("Confirm", "OK", "Continue"))
+          and not any(plain.search(x) for x in ("Close", "Cancel", "Decline", "Confirm and submit", "Submit")))
+    check("titles that gate them: privacy / consent / data protection",
+          all(title.search(x) for x in ("Data Privacy Agreement", "Consent", "Data protection notice"))
+          and not title.search("Submit your application?"))
+
+
 def _checks(base: str) -> int:
     _southridge()
     _hirebridge(base)
     _munson()
+    _applied()
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} passed")
     return 0 if passed == len(results) else 1
