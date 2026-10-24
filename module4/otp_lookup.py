@@ -38,6 +38,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from html import unescape as _html_unescape
 from pathlib import Path
 from typing import Optional
 
@@ -167,15 +168,63 @@ _MAGIC_LINK_CONTEXT = (
 )
 
 
-def extract_magic_link(text: str, subject: str = "") -> str:
+# Job 2201, 2026-10-23/24 (Dice): "Dice.com - Verify Candidate Email" is HTML
+# only, and its one link is a button
+#     <a href="https://www.dice.com/account/<token>?u=<token>&c=...">Verify Email</a>
+# Stripping tags drops the href, and the bare URL matches none of the patterns
+# above anyway, so the mail was skipped on all three attempts. A button whose
+# whole label is "Verify Email" / "Confirm your email" / "Activate account" is
+# the sign-in wording itself; the link must also point at the sender's own
+# registrable domain, so a newsletter's button cannot hand over a third
+# party's URL.
+_VERIFY_ANCHOR_RE = re.compile(
+    r"<a\b[^>]*?\bhref\s*=\s*([\"'])(https?://[^\"'\s<>]+)\1[^>]*>(.*?)</a\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_VERIFY_LABEL_RE = re.compile(
+    r"^(?:verify|confirm|activate|validate)(?: (?:your|my))?(?: candidate)?"
+    r" (?:e-?mail(?: address)?|account)(?: now)?$"
+)
+
+
+def _verify_anchor_link(html: str, sender: str) -> str:
+    """The href of a "Verify Email"-style button pointing at the sender's own site."""
+    from urllib.parse import urlparse
+
+    own = set(_registrable_labels(sender))
+    if not own or "<a" not in html.lower():
+        return ""
+    for m in _VERIFY_ANCHOR_RE.finditer(html):
+        label = " ".join(re.sub(r"[^a-z -]", " ", _strip_html(_html_unescape(m.group(3))).lower()).split())
+        if not _VERIFY_LABEL_RE.match(label):
+            continue
+        url = _html_unescape(m.group(2))
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except ValueError:
+            continue
+        if host and set(_registrable_labels(f"@{host}")) & own:
+            return url
+    return ""
+
+
+def extract_magic_link(text: str, subject: str = "", sender: str = "") -> str:
     """Return a one-click sign-in URL from `text`, or "".
 
     Requires BOTH link-shaped evidence and sign-in wording, so an ordinary
     mail containing some URL with a token query param is not mistaken for an
     auth link.
+
+    sender: the From header. When given and `text` is raw HTML, a button
+    labelled "Verify Email" (and the like) linking to the sender's own domain
+    also counts (see _VERIFY_ANCHOR_RE).
     """
     if not text:
         return ""
+    if sender:
+        link = _verify_anchor_link(text, sender)
+        if link:
+            return link
     plain = _strip_html(text)
     hay = f"{subject}\n{plain}".lower()
     if not any(w in hay for w in _MAGIC_LINK_CONTEXT):
@@ -320,9 +369,12 @@ def _walk_body(payload: dict, keep_html: bool = False) -> str:
                 decoded = _decode_b64url(body["data"])
             except Exception:  # pragma: no cover - malformed part
                 decoded = ""
-            if mime == "text/plain":
+            # A blank part is no body. Dice sends multipart/alternative with
+            # an EMPTY text/plain part next to the real HTML (job 2201);
+            # preferring that "plain" text made every Dice mail read as "".
+            if decoded.strip() and mime == "text/plain":
                 plain.append(decoded)
-            elif mime == "text/html":
+            elif decoded.strip() and mime == "text/html":
                 html.append(decoded)
         for sub in part.get("parts", []) or []:
             visit(sub)
@@ -333,11 +385,8 @@ def _walk_body(payload: dict, keep_html: bool = False) -> str:
     if html and keep_html:
         return "\n".join(html)
     if html:
-        # Strip tags cheaply; we only need numbers and nearby words. Insert
-        # spaces so `<td>1</td><td>2</td>` doesn't fuse into "12".
-        text = re.sub(r"<[^>]+>", " ", "\n".join(html))
-        text = text.replace("&nbsp;", " ").replace("&zwnj;", "")
-        return re.sub(r"[ \t]+", " ", text)
+        # Strip tags cheaply; we only need numbers and nearby words.
+        return _strip_html("\n".join(html))
     return ""
 
 
@@ -373,6 +422,9 @@ def _strip_html(text: str) -> str:
         return text
     out = re.sub(r"<[^>]+>", " ", text)
     out = out.replace("&nbsp;", " ").replace("&zwnj;", "")
+    # Entities decoded, or "didn&#8217;t" in an HTML-only mail offers "8217"
+    # as a 4-digit code to the loose pass.
+    out = _html_unescape(out)
     return re.sub(r"[ \t]+", " ", out)
 
 
@@ -690,6 +742,11 @@ _WHITE_LABEL_ATS: tuple[str, ...] = (
     "peoplestrong", "zohorecruit", "turbohire", "lever", "greenhouse", "ashbyhq",
     "workable", "recruitee", "teamtailor", "bamboohr", "freshteam", "keka",
     "ceipal", "jazzhr", "pinpointhq", "personio", "adp", "talentrecruit",
+    # Salesforce Sites career portals (<tenant>.my.salesforce-sites.com). Job
+    # 2089, 2026-10-24: Datum's portal mailed its code as
+    #     From: Datum Careers <careers@careers.datum.example>
+    # and the agent, reading the page URL, asked for salesforce-sites.com.
+    "salesforce-sites",
 )
 
 # Words that say nothing about WHICH company a name is. Dropped from the
@@ -1211,7 +1268,9 @@ def _search_pass(
         # being returned as the code "7754" (observed 2026-09-05).
         code = extract_code(body, subject=subject, require_context=True, sender=from_hdr)
         if not code:
-            link = extract_magic_link(body, subject=subject)
+            # Raw HTML (when there is no plain part) so button hrefs survive.
+            raw = _walk_body(msg.get("payload", {}), keep_html=True)
+            link = extract_magic_link(raw, subject=subject, sender=from_hdr)
             if link:
                 logger.info(
                     "otp_lookup: found sign-in link in message from %s (subject=%r)",
