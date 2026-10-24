@@ -201,6 +201,20 @@ _ACCOUNT_SETUP_CLICK = re.compile(
     r"register|forgot|reset (?:your )?password|verify (?:your )?email)\b",
     re.I,
 )
+# A long wizard that is still moving gets one more allowance near the end.
+# Wingtip 1594 (Avature, 2026-10-24) set 17 fields and attached its files on two
+# pages, then ran out at 80/80 five answers into the per-country work
+# authorization page; three other Wingtip jobs did the same form in 33-48 steps.
+# Moving means the pipeline itself set PROGRESS_MIN_NEW_FIELDS fields it had
+# not set before within the last PROGRESS_WINDOW_STEPS steps, so an agent
+# re-setting one field in a loop never qualifies. Granted once per job, when
+# a handoff finds PROGRESS_LOW_WATER steps or fewer left.
+PROGRESS_EXTENSION_STEPS = 25
+PROGRESS_EXTENSION_SEC = 360
+PROGRESS_MIN_NEW_FIELDS = 3
+PROGRESS_WINDOW_STEPS = 20
+PROGRESS_LOW_WATER = 10
+_FIELD_SET_LABEL_RE = re.compile(r"^FIELD_SET: (.+?) = ", re.MULTILINE)
 # Clicking is cheap, but a runaway loop of Submit clicks risks duplicate
 # applications, so keep this tight.
 MAX_CLICK_ROUNDS = 5
@@ -1541,11 +1555,17 @@ def _run_apply_agent(
 
     browser_session.forget_tabs(cdp_url)
 
+    account_extra = 0
+    progress_extra = 0
+    # Step count at which each field was first set by the pipeline.
+    fields_set_at: dict[str, int] = {}
+
     def account_setup_note() -> str:
         # The first account handoff grows the budget once and tells the agent.
-        nonlocal budget, deadline
-        if budget != base_budget:
+        nonlocal budget, deadline, account_extra
+        if account_extra:
             return ""
+        account_extra = ACCOUNT_SETUP_STEPS
         budget += ACCOUNT_SETUP_STEPS
         deadline += ACCOUNT_SETUP_SEC
         logger.info(
@@ -1557,14 +1577,40 @@ def _run_apply_agent(
             f"model steps were added, so this job's step budget is now {budget}."
         )
 
+    def progress_note(steps_used: int) -> str:
+        # Near the end of the budget, a form still being filled gets one more
+        # allowance (see PROGRESS_EXTENSION_STEPS).
+        nonlocal budget, deadline, progress_extra
+        if progress_extra or budget - steps_used > PROGRESS_LOW_WATER:
+            return ""
+        recent = sum(1 for at in fields_set_at.values() if at > steps_used - PROGRESS_WINDOW_STEPS)
+        if recent < PROGRESS_MIN_NEW_FIELDS:
+            return ""
+        progress_extra = PROGRESS_EXTENSION_STEPS
+        budget += PROGRESS_EXTENSION_STEPS
+        deadline += PROGRESS_EXTENSION_SEC
+        logger.info(
+            "[%s] Still progressing (%d new fields in the last %d steps): +%d steps, +%ds (budget now %d).",
+            job_id, recent, PROGRESS_WINDOW_STEPS, PROGRESS_EXTENSION_STEPS,
+            PROGRESS_EXTENSION_SEC, budget,
+        )
+        return (
+            f"\n\n[jobo] The form is still moving, so {PROGRESS_EXTENSION_STEPS} model steps "
+            f"were added once: this job's step budget is now {budget}, with "
+            f"{budget - steps_used} left and no more to come. Put every field you can set "
+            "from one listing in the SAME turn and head for Submit."
+        )
+
     while True:
         # A Workday apply always signs in or creates an account first, and
         # the agent usually does it by typing, with no handoff to trigger the
         # allowance: J&J 1885 (2026-10-18) spent ~12 steps creating one and
         # ran out on Voluntary Disclosures, step 4 of 5.
-        if session_id and budget == base_budget and _seen_workday(cdp_url):
+        if session_id and not account_extra and _seen_workday(cdp_url):
             prompt += account_setup_note()
         steps_used = sum(calls_by_session.values())
+        if session_id:
+            prompt += progress_note(steps_used)
         steps_left = budget - steps_used
         if session_id and steps_left <= 0:
             out = "\n".join(transcript_parts)
@@ -1573,12 +1619,12 @@ def _run_apply_agent(
             logger.warning("[%s] Step budget used up (%d/%d) mid-handoff.", job_id, steps_used, budget)
             # The number in brackets stays the BASE budget: blockers.py keys
             # "escalated attempt still exhausted" on it.
-            extra = budget - base_budget
             return ApplyOutcome(
                 status="stuck",
                 detail=(
                     f"ran out of step budget ({base_budget} model steps) mid-form, before submitting"
-                    + (f" (plus {extra} for account setup)" if extra else "")
+                    + (f" (plus {account_extra} for account setup)" if account_extra else "")
+                    + (f" (plus {progress_extra} while still progressing)" if progress_extra else "")
                 ),
             )
         remaining = int(deadline - time.monotonic())
@@ -1701,6 +1747,8 @@ def _run_apply_agent(
                 field_rounds += 1
                 reply = _resolve_field(line, cdp_url=cdp_url, job_id=job_id, failures=field_failures)
                 replies.append(reply)
+                for label in _FIELD_SET_LABEL_RE.findall(reply):
+                    fields_set_at.setdefault(label, sum(calls_by_session.values()))
                 if FIELD_MOVED_NOTE in reply:
                     form_changed = True
                 elif FORM_CHANGED_NOTE in reply:

@@ -84,6 +84,7 @@ SUITES = (
     'test_claude_auth',
     'test_greenhouse_embed',
     'test_upload_panels_postback',
+    'test_progress_budget',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',
