@@ -11,9 +11,11 @@ snapshots, and file upload via browser_cdp's DOM.setFileInputFiles for free.
 
 from __future__ import annotations
 
+from module4 import identity_walls
 from policy import employer_blocklist, paused_sites, personal
 
 PAUSED_SITES_TEXT = paused_sites.prompt_text()
+IDENTITY_WALLS_TEXT = identity_walls.prompt_text()
 BLOCKLIST_TEXT = employer_blocklist.prompt_text()
 
 # Everything about the candidate comes from the local, gitignored personal/
@@ -366,6 +368,14 @@ which is more than manual clicking can do.
 
 ## Hard rules
 - NEVER modify profile data: no invented employers, dates, metrics, or skills.
+- NEVER type personal data that is not in the candidate facts: no date of
+  birth, PAN, Aadhaar, passport or national ID number, or any other personal
+  detail the facts do not give, and no "placeholder" value either. This holds on account and
+  registration forms exactly as on the application itself. If a REQUIRED
+  field asks for one, stop and report:
+      STATUS: stuck
+      DETAIL: <site> requires <field>, which is not in the candidate facts
+  An optional one stays empty.
 - If the posting says "No longer accepting applications" or has no apply
   control, stop and report status=closed.
 - Never touch anything unrelated to this application (no messaging, no
@@ -473,6 +483,16 @@ straight away:
 Do not hunt for a workaround and do not spend turns on it. Three jobs each
 burned a full budget on this. Note this is different from a portal that HAS an
 email/password option alongside OAuth - there, use email/password as normal.
+
+**Apple Account walls: stop on arrival.** {IDENTITY_WALLS_TEXT} shows no
+application form until you sign in with an Apple Account, and that needs an
+Apple ID approved on the candidate's trusted device. Do not sign in, do not
+create an Apple Account, do not fill anything. Report straight away:
+    STATUS: stuck
+    DETAIL: <host> requires an Apple ID sign-in (trusted device); not attempted
+    FIELDS_FILLED_JSON: {{}}
+One job spent its whole budget on Apple's account signup and never reached
+the application.
 
 **Google Forms (docs.google.com/forms, forms.gle).** If the form itself is
 visible, fill it like any other form; a "Sign in to Google to save your

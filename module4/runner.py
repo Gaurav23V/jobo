@@ -36,6 +36,7 @@ from module4 import (
     email_apply,
     frame_keeper,
     google_forms,
+    identity_walls,
     linkedin_router,
     linkedin_session,
     persist,
@@ -658,6 +659,18 @@ def _send_parked_draft(session, job, parked: tuple[str, str], result: "Module4Re
     logger.info("[%s] SUBMITTED: parked email draft %s sent (gmail id %s).", jid, draft_id, mid)
 
 
+def _drop_identity_wall(session, job, host: str, result: "Module4Result", *, dry_run: bool) -> None:
+    """Drop a job on an identity-wall host (module4/identity_walls.py) without an agent."""
+    status = identity_walls.status_for(host)
+    persist.mark_status(session, job, status, dry_run=dry_run)
+    persist.drop_permanently(session, job, dry_run=dry_run)
+    perm = blockers.permanent_reason_from_last_status(status)
+    result.dropped += 1
+    result.permanent_blocked += 1
+    result.details.append(f"job_id={job.id}: DROPPED before any agent, {host} ({perm})")
+    logger.info("[%s] Dropped without an agent: %s (%s).", job.id, perm, host)
+
+
 def run_module4(
     session: Session,
     *,
@@ -975,6 +988,14 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             logger.info("[%s] Parked without an agent: hCaptcha sign-in wall on %s.", jid, wall_host)
             continue
 
+        # A job_url on a site that only takes applications behind an outside
+        # identity we cannot use (GHO-92: jobs.apple.com) is dropped with the
+        # external-identity reason, as every attempt there was.
+        id_wall = identity_walls.identity_wall_for_url(job.job_url)
+        if id_wall and not force:
+            _drop_identity_wall(session, job, id_wall, result, dry_run=dry_run)
+            continue
+
         counts_before_job = _counters(result)
         result.attempted += 1
 
@@ -1077,6 +1098,10 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 result.captcha_parked += 1
                 result.details.append(f"job_id={jid}: PARKED when routed, {wall}")
                 logger.info("[%s] Parked when routed (no attempt charged): %s.", jid, wall)
+            elif route.kind == linkedin_router.EXTERNAL and not force and (
+                id_wall := identity_walls.identity_wall_for_url(route.apply_url)
+            ):
+                _drop_identity_wall(session, job, id_wall, result, dry_run=dry_run)
             elif route.kind == linkedin_router.EXTERNAL and google_forms.find_form_url(route.apply_url) is None:
                 worker.hand_off(jid, "form", route.apply_url, f"external: {route.reason}")
                 result.routed_form += 1
