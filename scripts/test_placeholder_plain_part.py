@@ -184,6 +184,39 @@ def reset_policy_cases() -> list[tuple[str, object, object]]:
     ]
 
 
+def retry_notice_cases() -> list[tuple[str, object, object]]:
+    # The stored statuses of 2330's first two attempts; each retry read the
+    # quoted failure as a dead wall and stopped at the sign-in page without
+    # asking for a code.
+    missed = (
+        "hirist.tech requires email verification to sign in (account exists, password unknown) "
+        "but no OTP or password-reset email arrived after 3 send attempts (1 reset + 2 OTP resends)"
+    )
+    missed_again = (
+        'LinkedIn "Apply on company website" routes to hirist.tech, which requires login; a prior '
+        "attempt already exhausted 3 OTP/reset email attempts with no mail arriving for "
+        "alex@example.com, and hirist.tech is excluded from the password-reset flow (OTP-only sign-in)"
+    )
+
+    def retry(previous: str | None) -> str:
+        return prompts.user_prompt(
+            job_id=2330, company="Acme", title="Dev", url="https://www.hirist.tech/j/1",
+            resume_path="/tmp/r.pdf", cover_path=None, previous_failure=previous,
+        )
+
+    return [
+        ("missed_otp_retry_asks_for_code_again", True, "end\nyour turn with NEED_OTP: <that site>" in retry(missed)),
+        ("missed_otp_second_retry_too", True, "NEED_OTP: <that site>" in retry(missed_again)),
+        ("missed_otp_not_called_unsolvable", False, "unsolvable" in retry(missed_again)),
+        ("missed_otp_old_failure_not_quoted", False, "exhausted" in retry(missed_again)),
+        ("other_failure_still_quoted", True, "no file input" in retry("resume upload failed: no file input")),
+        ("missed_code_not_found_too", True, "NEED_OTP" in retry("verification code not found in the inbox")),
+        ("upload_failure_no_otp_note", False, "NEED_OTP" in retry("resume upload failed: no file input")),
+        ("captcha_failure_no_otp_note", False, "NEED_OTP" in retry("captcha wall on apply page")),
+        ("first_attempt_no_otp_note", False, "NEED_OTP" in retry(None)),
+    ]
+
+
 def main() -> int:
     otp_lookup._candidate_name_words = lambda: {"alex", "example"}
     real_service = otp_lookup._gmail_service
@@ -194,6 +227,7 @@ def main() -> int:
             ("hirist.tech mails (job 2330)", lookup_cases()),
             ("placeholder plain parts and unquoted links", unit_cases()),
             ("no password reset on OTP sign-in sites", reset_policy_cases()),
+            ("retry after a missed emailed code", retry_notice_cases()),
         ):
             print(f"\n  -- {title} --")
             for label, expected, got in rows:

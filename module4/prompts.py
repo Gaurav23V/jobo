@@ -11,12 +11,19 @@ snapshots, and file upload via browser_cdp's DOM.setFileInputFiles for free.
 
 from __future__ import annotations
 
+import re
+
 from module4 import identity_walls, password_reset
 from policy import employer_blocklist, paused_sites, personal
 
 PAUSED_SITES_TEXT = paused_sites.prompt_text()
 IDENTITY_WALLS_TEXT = identity_walls.prompt_text()
 OTP_SIGNIN_TEXT = ", ".join(password_reset.OTP_SIGNIN_DOMAINS)
+# A stored failure saying the emailed code or reset mail never showed up.
+_MISSED_MAIL_RE = re.compile(
+    r"\b(otp|code|verification|reset)\b.*\b(arriv\w*|not found|never came|not received)",
+    re.I,
+)
 BLOCKLIST_TEXT = employer_blocklist.prompt_text()
 
 # Everything about the candidate comes from the local, gitignored personal/
@@ -728,7 +735,23 @@ def user_prompt(
 
     upload_name = Path(resume_path).name if resume_path else "(none)"
     retry_note = ""
-    if previous_failure:
+    if previous_failure and _MISSED_MAIL_RE.search(previous_failure):
+        # Antino 2330 (2026-10-25): the codes had arrived but the inbox reader
+        # missed them. Quoting that failure next to "don't loop on an
+        # unsolvable blocker" made two retries stop at the sign-in page
+        # without asking for a code, so this notice replaces the generic one.
+        retry_note = """
+
+RETRY NOTICE: a previous attempt on this exact job got as far as an emailed
+sign-in code or reset mail, and the pipeline did not find that mail. That was
+a miss on the pipeline's side, not a wall on the site, so this job is
+expected to go through now. Sign in again: request a fresh code (on sites that
+sign in by emailed OTP use the OTP option, never "Forgot password") and end
+your turn with NEED_OTP: <that site>. Report stuck only if a fresh NEED_OTP
+this time also comes back without a code. Never clear cookies or site data to
+get a "fresh session" - that signs the candidate out of LinkedIn for every
+later job."""
+    elif previous_failure:
         retry_note = f"""
 
 RETRY NOTICE: a previous attempt on this exact job failed with:
