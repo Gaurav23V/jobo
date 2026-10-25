@@ -189,8 +189,9 @@ MAX_STALE_REFUNDS = 8
 # rounds covers a resend; more means the flow is not working.
 MAX_PASSWORD_RESET_ROUNDS = 2
 PASSWORD_RESET_WAIT_SEC = 75
-# Account setup (sign in, create account, forgot password, reset email) comes
-# before the form and used to come out of the form's budget. 1464 Willowby
+# Account setup (sign in, create account, forgot password, reset email, an
+# emailed code or link) comes before the form and used to come out of the
+# form's budget. 1464 Willowby
 # (2026-10-15) spent its first ~10 minutes on Workday sign-in clicks and a
 # reset, then ran out at 80/80 on My Information, step 1 of 5. The first
 # account handoff in a job adds this much room, once (GHO-20).
@@ -1914,6 +1915,11 @@ def _run_apply_agent(
                     "through to submission. Do not restart the form - your browser "
                     "session is still on the same page."
                 )
+                # An emailed code or link is account setup too, and it often
+                # comes late: FedEx 2244 (Paradox chat, 2026-10-25) got its code
+                # after a long chat intake and ran out at 80/80 two digits in,
+                # before the form behind it.
+                prompt += account_setup_note()
             elif note.startswith("REFUSED: "):
                 otp_rounds = MAX_OTP_ROUNDS
                 prompt = (
