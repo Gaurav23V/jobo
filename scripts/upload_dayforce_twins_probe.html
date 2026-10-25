@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Dayforce twin resume inputs probe</title>
+<!--
+Replica of the Dayforce "Apply without an Account" form (jobs.dayforcehcm.com
+CANDIDATEPORTAL .../apply/manualApplication), measured on 2026-10-25 in a scratch
+Chromium, no submit. Markup trimmed from the live page's #jobPostingApplication.
+
+* The application is an antd form rendered as <div class="ant-form">, not a
+  <form>, and has no test ids or custom elements above the inputs that the
+  uploader's ancestor chain reads.
+* Two <input type=file id="jobPostingApplication_files_resume" accept="doc,docx,pdf,rtf">
+  bound to the same form field: the "Import Resume" parser button at the top of
+  "Candidate Info" and the "Resume Upload" section's slot. Both buttons say
+  "Import Resume". The only attribute that differs is aria-required="true" on
+  the Resume Upload input.
+* On change, rc-upload re-keys the input: the written node is replaced by a fresh
+  empty one with the same attributes, and the file name shows in BOTH lists
+  (one field).
+
+?bare=1 : drop aria-required, so the two resume inputs are attribute-identical.
+-->
+<body>
+<div class="ant-card"><div class="ant-card-body">
+<h2 class="ant-typography">Candidate Info</h2>
+<div id="jobPostingApplication" class="ant-form ant-form-vertical">
+  <div class="mt-5" test-id="application-step-candidateinfo">
+    <div><div test-id="import-resume-section" class="ant-row ant-row-space-between mt-6">
+      <div class="ant-col ant-col-md-16"><span class="ant-typography" test-id="import-resume-section-instruction">Click Import Resume to add this information from your resume. You can also enter the information manually in the fields below.</span></div>
+      <div class="ant-col ant-col-xs-24 ant-col-md-8"><div class="ant-form-item"><div class="ant-row ant-form-item-row"><div class="ant-col ant-form-item-control"><div class="ant-form-item-control-input"><div class="ant-form-item-control-input-content">
+        <span class="ant-upload-wrapper justify-items-start grid" data-slot="import"><div class="ant-upload ant-upload-select"><span class="ant-upload"><input id="jobPostingApplication_files_resume" type="file" accept="doc,docx,pdf,rtf" style="display: none;"><button tabindex="0" role="presentation" test-id="import-resume-section-button" type="button" class="ant-btn ant-btn-block"><span>Import Resume</span></button></span></div><div class="ant-upload-list ant-upload-list-text"></div></span>
+      </div></div></div></div></div></div>
+    </div><div class="ant-divider" role="separator"></div></div>
+    <div><div test-id="personal-information"><h2 class="ant-typography" test-id="personal-info-title">Personal Information<span aria-hidden="true">*</span></h2>
+      <form id="personalInfo"><label for="jobPostingApplication_personalInfo_email">Email Address</label><input id="jobPostingApplication_personalInfo_email" type="text"></form>
+    </div></div>
+    <div><div><section test-id="resume-upload-section"><h2 class="ant-typography mb-6" test-id="resume-upload-title">Resume Upload</h2>
+      <div class="max-w-sm"><div class="ant-form-item"><div class="ant-row ant-form-item-row"><div class="ant-col ant-form-item-label"><label for="jobPostingApplication_files_resume" class="ant-form-item-required" title="Attachment:">Attachment:</label></div><div class="ant-col ant-form-item-control"><div class="ant-form-item-control-input"><div class="ant-form-item-control-input-content">
+        <span class="ant-upload-wrapper" data-slot="upload"><div class="ant-upload ant-upload-select"><span class="ant-upload"><input aria-required="true" id="jobPostingApplication_files_resume" type="file" accept="doc,docx,pdf,rtf" style="display: none;"><button tabindex="0" role="presentation" test-id="resume-upload-button" type="button" class="ant-btn ant-btn-block"><span>Import Resume</span></button></span></div><div class="ant-upload-list ant-upload-list-text"></div></span>
+      </div></div></div></div></div></div>
+    </section><div class="ant-divider" role="separator"></div></div>
+    <div><section test-id="cover-letter-upload-section"><h2 class="ant-typography mb-6" test-id="cover-letter-upload-title">Cover Letter</h2>
+      <div class="max-w-xs"><div class="ant-form-item"><div class="ant-form-item-control-input-content">
+        <span class="ant-upload-wrapper" data-slot="cover"><div class="ant-upload ant-upload-select"><span class="ant-upload"><input id="jobPostingApplication_files_coverLetter" type="file" accept="doc,docx,pdf,rtf" style="display: none;"><button tabindex="0" role="presentation" test-id="cover-letter-upload-button" type="button" class="ant-btn ant-btn-block"><span>Add Cover Letter</span></button></span></div><div class="ant-upload-list ant-upload-list-text"></div></span>
+      </div></div></div>
+    </section></div>
+    <div><section test-id="additional-documents-upload-section"><h2 class="ant-typography mb-6" test-id="additional-documents-upload-title">Additional Documents</h2>
+      <div class="max-w-xs"><div class="ant-form-item"><div class="ant-form-item-control-input-content">
+        <span class="ant-upload-wrapper" data-slot="extra"><div class="ant-upload ant-upload-select"><span class="ant-upload"><input id="jobPostingApplication_files_additionalDocument" type="file" accept="doc,docx,jpg,pdf,png,rtf,tif,tiff,xls,xlsx" style="display: none;"><button tabindex="0" role="presentation" test-id="additional-documents-upload-button" type="button" class="ant-btn ant-btn-block"><span>Add Additional Documents</span></button></span></div><div class="ant-upload-list ant-upload-list-text"></div></span>
+      </div></div></div>
+    </section></div>
+  </div>
+</div>
+</div></div>
+<script>
+const params = new URLSearchParams(location.search);
+window.__uploads = {import: 0, upload: 0, cover: 0, extra: 0};
+if (params.get('bare')) document.querySelector('[aria-required]').removeAttribute('aria-required');
+
+function watch(input) {
+  input.addEventListener('change', () => {
+    const files = [...input.files];
+    if (!files.length) return;
+    const wrapper = input.closest('.ant-upload-wrapper');
+    const slot = wrapper.dataset.slot;
+    window.__uploads[slot] += 1;
+    setTimeout(() => {
+      // rc-upload re-keys its input after taking the file.
+      const fresh = input.cloneNode(false);
+      fresh.value = '';
+      input.replaceWith(fresh);
+      watch(fresh);
+      const shared = slot === 'import' || slot === 'upload'
+        ? document.querySelectorAll('[data-slot=import] .ant-upload-list, [data-slot=upload] .ant-upload-list')
+        : [wrapper.querySelector('.ant-upload-list')];
+      for (const list of shared) list.innerHTML = `<div class="ant-upload-list-item"><span class="ant-upload-list-item-name">${files[0].name}</span></div>`;
+    }, 10);
+  });
+}
+document.querySelectorAll('input[type=file]').forEach(watch);
+window.__state = () => JSON.stringify({uploads: window.__uploads});
+</script>
+</body>

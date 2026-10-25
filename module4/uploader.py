@@ -1046,6 +1046,20 @@ def _select(targets: list[UploadTarget], filename: str, want: str, hint: str) ->
             # two `input#file-input`): the host chain is the identity.
             chosen.identity_attrs[_WHERE_KEY] = chosen.where_chain
             same = [t for t in same if t.where_chain == chosen.where_chain]
+        # Dayforce (Interactive Brokers 2127): two `input#jobPostingApplication_
+        # files_resume` in one antd form with no <form>, test ids or custom
+        # elements around them, the "Candidate Info" import and the "Resume
+        # Upload" slot. Only the second carries aria-required="true". Any other
+        # stable attribute that sets the chosen input apart, by its value or
+        # by its absence (None), completes the identity.
+        for extra in sorted({k for t in same for k in t.attrs} - _UNSTABLE_ATTRS):
+            if len(same) == 1:
+                break
+            val = chosen.attrs.get(extra)
+            kept = [t for t in same if t.attrs.get(extra) == val]
+            if len(kept) < len(same):
+                chosen.identity_attrs[extra] = val
+                same = kept
         if len(same) != 1:
             raise RuntimeError('ambiguous original upload identity')
     return chosen
@@ -1053,6 +1067,10 @@ def _select(targets: list[UploadTarget], filename: str, want: str, hint: str) ->
 
 # Pseudo-attribute in `identity_attrs`: the input's named-ancestor chain.
 _WHERE_KEY = "__where_chain__"
+# Attributes a page rewrites as the user works (validation state, styling),
+# so they cannot tell twins apart across the post-upload re-read.
+_UNSTABLE_ATTRS = frozenset({"style", "class", "value", "tabindex", "disabled",
+                             "aria-invalid", "aria-describedby", "aria-busy", "aria-disabled"})
 
 
 def _identity_value(attrs: dict, chain: str, key: str):

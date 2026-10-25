@@ -20,6 +20,12 @@ Measured live on 2026-10-04 (scratch Chromium, real pages, no submit):
   * Keka (visible input#resume-upload + hidden twin) was already fixed by 7806cbc;
     kept here so the twin tie-break cannot regress it.
 
+Dayforce (Interactive Brokers 2127, 2026-10-25): two `input#jobPostingApplication_
+files_resume` with no <form>, test id or custom element to tell them apart; only
+aria-required="true" on the "Resume Upload" one. The slot was chosen, then every
+request failed "ambiguous original upload identity" (4 rounds). Page:
+scripts/upload_dayforce_twins_probe.html.
+
 Page: scripts/upload_twin_inputs_probe.html. Self-isolated: own headless
 Chromium on a random port (never 9333).
 Run: bash scripts/run_regression_tests.sh test_upload_twin_inputs
@@ -38,6 +44,7 @@ from module4 import uploader  # noqa: E402
 from scripts.test_upload_stability import Stability  # noqa: E402
 
 PROBE = Path(__file__).resolve().parent / "upload_twin_inputs_probe.html"
+DAYFORCE = Path(__file__).resolve().parent / "upload_dayforce_twins_probe.html"
 CDP = ""
 RESUME: Path
 results: list[tuple[str, bool, str]] = []
@@ -48,8 +55,8 @@ def check(label: str, ok: bool, note: str = "") -> None:
     print(f"  {'PASS' if ok else 'FAIL'}  {label:66s} {note}")
 
 
-def open_probe(query: str = "") -> dict:
-    url = PROBE.as_uri() + (("?" + query) if query else "")
+def open_probe(query: str = "", probe: Path = PROBE) -> dict:
+    url = probe.as_uri() + (("?" + query) if query else "")
     req = urllib.request.Request(f"{CDP}/json/new?{url}", method="PUT")
     with urllib.request.urlopen(req, timeout=10) as r:
         tab = json.load(r)
@@ -78,8 +85,8 @@ def state(tab: dict):
         return json.loads(raw) if raw else None
 
 
-def run(query: str = "", hint: str = ""):
-    tab = open_probe(query)
+def run(query: str = "", hint: str = "", probe: Path = PROBE):
+    tab = open_probe(query, probe)
     try:
         res = uploader.upload_file(CDP, str(RESUME), want="resume", hint=hint)
         time.sleep(0.3)
@@ -129,6 +136,21 @@ def _checks() -> int:
           res.ok and st["uploads"]["keka_visible"] == 1 and st["uploads"]["keka_hidden"] == 0,
           f"ok={res.ok} uploads={st['uploads']}")
 
+    print("\nDayforce: two input#jobPostingApplication_files_resume, one aria-required")
+    for hint in ("", 'under "Resume Upload"', 'aria-required="true"'):
+        res, st = run(hint=hint, probe=DAYFORCE)
+        check(f"hint {hint or '(none)'!r} writes the Resume Upload slot once",
+              res.ok and st["uploads"] == {"import": 0, "upload": 1, "cover": 0, "extra": 0},
+              f"ok={res.ok} uploads={st['uploads']} {res.detail[:60]}")
+    res, st = run(hint='under "Candidate Info"', probe=DAYFORCE)
+    check('hint `under "Candidate Info"` picks the import twin (identity: no aria-required)',
+          res.ok and st["uploads"] == {"import": 1, "upload": 0, "cover": 0, "extra": 0},
+          f"ok={res.ok} uploads={st['uploads']} {res.detail[:60]}")
+    res, st = run(query="bare=1", probe=DAYFORCE)
+    check("attribute-identical twins still refuse, nothing written",
+          not res.ok and "ambiguous" in res.detail and sum(st["uploads"].values()) == 0,
+          f"ok={res.ok} uploads={st['uploads']} {res.detail[:60]}")
+
     print("\nUnit: tie-break never invents a choice")
     bare = [uploader.UploadTarget(7, {"type": "file"}, "t", "ws"),
             uploader.UploadTarget(8, {"type": "file"}, "t", "ws")]
@@ -146,6 +168,15 @@ def _checks() -> int:
         check("same-named sections with no resume/autofill words still refuse", False)
     except RuntimeError:
         check("same-named sections with no resume/autofill words still refuse", True)
+    styled = [uploader.UploadTarget(11, {"type": "file", "id": "r", "class": "a"}, "t", "ws",
+                                    where_heading="Resume"),
+              uploader.UploadTarget(12, {"type": "file", "id": "r", "class": "b"}, "t", "ws",
+                                    where_heading="Cover")]
+    try:
+        uploader._select(styled, "resume.pdf", "resume", "")
+        check("twins that differ only in class (unstable) still refuse", False)
+    except RuntimeError as e:
+        check("twins that differ only in class (unstable) still refuse", "identity" in str(e), str(e))
 
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} passed")
