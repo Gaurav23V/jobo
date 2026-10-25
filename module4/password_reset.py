@@ -112,9 +112,10 @@ _RESET_SUBJECT_HINTS = (
 
 _URL_RE = re.compile(r"https?://[^\s\"'<>\)\]]+", re.I)
 
-# <a href="URL">label</a>, with the href quoted either way.
+# <a href="URL">label</a>, with the href quoted either way or not at all
+# (hirist.tech: <a href=https://postoffice.hirist.tech/...>click here</a>).
 _ANCHOR_RE = re.compile(
-    r"<a\b[^>]*?\bhref\s*=\s*(?:\"([^\"]*)\"|'([^']*)')[^>]*>", re.I
+    r"<a\b[^>]*?\bhref\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'>]+))[^>]*>", re.I
 )
 
 
@@ -130,7 +131,7 @@ def mail_text(raw: str) -> str:
     if "<" not in (raw or ""):
         return raw or ""
     raw = _ANCHOR_RE.sub(
-        lambda m: f" {html.unescape(m.group(1) or m.group(2) or '')} ", raw
+        lambda m: f" {html.unescape(m.group(1) or m.group(2) or m.group(3) or '')} ", raw
     )
     return otp_lookup._strip_html(raw)
 
@@ -389,6 +390,23 @@ def find_reset_link(
         searched_query=query,
         candidates_seen=scanned,
     )
+
+
+# Sites where the candidate has a long-standing account of their own (job
+# alerts for months) that signs in by an emailed one-time code. A reset was
+# declined for Internshala on GHO-60; hirist.tech is the same case (job 2330,
+# GHO-94). A reset there changes the candidate's own password, so never.
+OTP_SIGNIN_DOMAINS: tuple[str, ...] = ("hirist.tech", "hirist.com", "internshala.com")
+
+
+def otp_signin_domain(domain: str) -> str:
+    """The OTP_SIGNIN_DOMAINS entry `domain` belongs to, or ""."""
+    d = (domain or "").strip().lower().rstrip(".")
+    d = re.sub(r"^[a-z]+://", "", d).split("/")[0]
+    for site in OTP_SIGNIN_DOMAINS:
+        if d == site or d.endswith("." + site):
+            return site
+    return ""
 
 
 # `NEED_PASSWORD_RESET: <domain>`

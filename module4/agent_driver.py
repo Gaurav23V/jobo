@@ -1320,6 +1320,19 @@ def _resolve_password_reset(line: str, *, job_id: int) -> str:
         )
         return f"PASSWORD_RESET_REFUSED: {_ACCOUNT_SIGNIN_REFUSAL}"
 
+    otp_site = password_reset.otp_signin_domain(domain)
+    if otp_site:
+        logger.warning(
+            "[%s] REFUSED a password reset for %s (signs in by emailed OTP).", job_id, domain
+        )
+        return (
+            f"PASSWORD_RESET_REFUSED: the candidate's own {otp_site} account is never "
+            "password-reset. Sign in with an emailed one-time code instead: on the "
+            "sign-in page choose the 'Login with OTP' / email OTP option (not 'Forgot "
+            f"password'), enter {personal.email()}, request the code, then end your turn "
+            f"with exactly `NEED_OTP: {otp_site}`. Do not open any reset link."
+        )
+
     logger.info("[%s] Agent requested a password reset for %s.", job_id, domain)
     recorded = personal.site_password(domain)
     if recorded:

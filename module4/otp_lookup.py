@@ -353,6 +353,23 @@ def _decode_b64url(data: str) -> str:
     return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
 
 
+# What a stub text/plain part says instead of the mail: "Please enable HTML",
+# "This email requires an HTML-capable client", "View this email in your
+# browser".
+_PLACEHOLDER_PLAIN_RE = re.compile(
+    r"\b(enable|turn on|switch to|requires?|supports?|support for|capable of)\b.{0,40}\bhtml\b"
+    r"|\bhtml\b.{0,30}\b(version|view|capable|enabled|required)\b"
+    r"|\bview (this|the) (e-?mail|message|newsletter) (in|on) (a|your) (web )?browser\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _is_placeholder_plain(text: str) -> bool:
+    """A short text/plain part that only points at the HTML part."""
+    text = text.strip()
+    return len(text) <= 200 and bool(_PLACEHOLDER_PLAIN_RE.search(text))
+
+
 def _walk_body(payload: dict, keep_html: bool = False) -> str:
     """Flatten a Gmail payload into searchable text (plain preferred).
 
@@ -380,6 +397,11 @@ def _walk_body(payload: dict, keep_html: bool = False) -> str:
             visit(sub)
 
     visit(payload)
+    if html:
+        # A stub plain part is no body either. hirist.tech sends
+        # multipart/alternative with text/plain "Please Enable HTML" next to
+        # the real HTML (job 2330); that stub hid the OTP and the reset link.
+        plain = [p for p in plain if not _is_placeholder_plain(p)]
     if plain:
         return "\n".join(plain)
     if html and keep_html:

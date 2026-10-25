@@ -64,7 +64,7 @@ SUITES = (
     'test_apply_token_controls', 'test_otp_handoff', 'test_dropdown_shapes',
     'test_avature_school', 'test_google_forms', 'test_otp_sender_guard',
     'test_otp_employer_brand', 'test_otp_workday_activation',
-    'test_otp_html_link_and_portal',
+    'test_otp_html_link_and_portal', 'test_placeholder_plain_part',
     'test_linkedin_session', 'test_avature_budget', 'test_upload_twin_inputs', 'test_upload_chooser_iframe', 'test_upload_company_sites',
     'test_captcha_walls', 'test_skip_walls', 'test_easy_apply_resume',
     'test_easy_apply_captcha_misread',

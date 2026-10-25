@@ -11,11 +11,12 @@ snapshots, and file upload via browser_cdp's DOM.setFileInputFiles for free.
 
 from __future__ import annotations
 
-from module4 import identity_walls
+from module4 import identity_walls, password_reset
 from policy import employer_blocklist, paused_sites, personal
 
 PAUSED_SITES_TEXT = paused_sites.prompt_text()
 IDENTITY_WALLS_TEXT = identity_walls.prompt_text()
+OTP_SIGNIN_TEXT = ", ".join(password_reset.OTP_SIGNIN_DOMAINS)
 BLOCKLIST_TEXT = employer_blocklist.prompt_text()
 
 # Everything about the candidate comes from the local, gitignored personal/
@@ -512,6 +513,12 @@ Many ATS portals already have an account for {CANDIDATE_EMAIL} from an
 earlier application, so "Sign up" is refused ("an account already exists") and
 you do not know the password. This is NO LONGER a reason to report stuck - the
 pipeline can read the reset email for you.
+
+Exception: {OTP_SIGNIN_TEXT} hold the candidate's own long-standing account,
+which signs in by a one-time code emailed to {CANDIDATE_EMAIL}. There, choose
+the sign-in page's "Login with OTP" / email OTP option, request the code and
+ask `NEED_OTP: <that site>`. Never click "Forgot password" on those sites and
+never ask NEED_PASSWORD_RESET for them; the pipeline refuses it.
 
 When you hit a sign-in wall for an existing account:
 1. Sign in with {CANDIDATE_EMAIL} / {ACCOUNT_PASSWORD} first. An earlier run
