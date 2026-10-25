@@ -87,6 +87,7 @@ SUITES = (
     'test_upload_panels_postback',
     'test_progress_budget',
     'test_otp_account_budget',
+    'test_otp_paradox_hyphen_code',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',

@@ -137,6 +137,39 @@ def _looks_like_word(token: str) -> bool:
 # digit groups whose digits total 4-8, then join them.
 _SPACED_CODE_RE = re.compile(r"(?<![A-Za-z0-9])(\d{1,3}(?:[ \t\u00a0]+\d{1,3}){1,7})(?![A-Za-z0-9])")
 
+# Paradox (job 2244, 2026-10-25) writes its code as two hyphenated halves:
+# "726-908 is your <Employer> <Division> Candidate Data verification code".
+# Only two EQUAL halves of 3 or 4 digits count, so a phone tail ("555-1234")
+# or a date ("10-25-2026", "2026-10-25") is never joined into a code.
+_HYPHEN_CODE_RE = re.compile(r"(?<![A-Za-z0-9-])(\d{3}-\d{3}|\d{4}-\d{4})(?![A-Za-z0-9]|-\d)")
+
+# "<code> is your ... code": the code leads, and the label can sit far behind
+# it once the sender spells out a long brand name - Paradox's label above is
+# 60+ characters past the code, outside the context windows of step 1, so the
+# footer ZIP was returned instead (5 digits, typed into a 6-digit field).
+_LEAD_CODE_RE = re.compile(
+    r"(?<![A-Za-z0-9-])(\d{3}-\d{3}|\d{4}-\d{4}|[A-Za-z0-9]{4,8})\s+is\s+your\s+"
+    r"(?:[A-Za-z0-9&.'-]+\s+){0,10}?(?:code|otp|passcode|pin)(?![a-z])",
+    re.IGNORECASE,
+)
+
+# A number in a postal address ("1200 E Main Rd, Springfield, Ohio
+# 45502") is not a code. Every Paradox mail carries the employer's address
+# in its footer, so the loose fallback must not read a ZIP out of it.
+_STREET_SUFFIX = (
+    r"(?:rd|road|st|street|ave|avenue|blvd|boulevard|dr|drive|ln|lane"
+    r"|hwy|highway|pkwy|parkway|suite|ste|floor)"
+)
+_ADDRESS_BEFORE_RE = re.compile(rf"(?<![a-z]){_STREET_SUFFIX}\.?,", re.IGNORECASE)
+# ...nor is the house number that starts one ("1200 E Main Rd,").
+_ADDRESS_AFTER_RE = re.compile(
+    rf"^\s+(?:[A-Za-z][A-Za-z.'-]*\s+){{1,4}}{_STREET_SUFFIX}\.?(?:,|\s*$)", re.IGNORECASE
+)
+
+# One half of "5821-0937" is not a code on its own.
+_HYPHEN_HALF_BEFORE_RE = re.compile(r"\d-$")
+_HYPHEN_HALF_AFTER_RE = re.compile(r"^-\d")
+
 # Some portals skip codes entirely and mail a one-click sign-in URL. Ranked
 # highest-first: a token-bearing auth path is the real link, while the same
 # mail also carries logo, unsubscribe and help-centre URLs.
@@ -240,6 +273,14 @@ def _join_spaced(fragment: str) -> str:
     return re.sub(r"[ \t\u00a0]+", "", fragment)
 
 
+def _hyphen_half(text: str, m: re.Match) -> bool:
+    """True when the _CODE_RE match `m` is one half of a "5821-0937" pair."""
+    return bool(
+        _HYPHEN_HALF_BEFORE_RE.search(text[max(0, m.start() - 2) : m.start()])
+        or _HYPHEN_HALF_AFTER_RE.match(text[m.end() : m.end() + 2])
+    )
+
+
 def _spaced_candidates(window: str) -> list[str]:
     """Digit-group runs in `window` collapsed into plausible codes."""
     out = []
@@ -247,6 +288,8 @@ def _spaced_candidates(window: str) -> list[str]:
         joined = _join_spaced(m.group(1))
         if 4 <= len(joined) <= 8 and not _YEAR_RE.match(joined):
             out.append(joined)
+    for m in _HYPHEN_CODE_RE.finditer(window):
+        out.append(m.group(1).replace("-", ""))
     return out
 
 
@@ -527,8 +570,17 @@ def extract_code(
         length, digits_only = shape
         return len(token) == length and (token.isdigit() or not digits_only)
 
-    # 1. Context-phrase adjacency.
+    # 1. Context-phrase adjacency. "<code> is your ... code" is checked
+    # first: there the label can be far behind the code (see _LEAD_CODE_RE).
     context_hits: list[str] = []
+    for m in _LEAD_CODE_RE.finditer(haystack):
+        token = m.group(1)
+        if "-" in token:
+            token = token.replace("-", "")
+        elif _looks_like_year(token) or _looks_like_word(token):
+            continue
+        if fits(token):
+            context_hits.append(token)
     for word, word_re in _CONTEXT_RES:
         for wm in word_re.finditer(lowered):
             idx = wm.start()
@@ -540,6 +592,8 @@ def extract_code(
                 for m in _CODE_RE.finditer(window):
                     token = m.group(1)
                     if _looks_like_year(token) or _looks_like_word(token):
+                        continue
+                    if _hyphen_half(window, m):
                         continue
                     neighbourhood = window[max(0, m.start() - 30) : m.end() + 30].lower()
                     if any(neg in neighbourhood for neg in _NEGATIVE_CONTEXT):
@@ -622,6 +676,12 @@ def extract_code(
         # 337914.\nRequisition 2024..." would lose a perfectly good code.
         neighbourhood = text_nolinks[max(0, m.start() - 40) : m.start()].lower()
         if any(neg in neighbourhood for neg in _NEGATIVE_CONTEXT):
+            continue
+        if _ADDRESS_BEFORE_RE.search(neighbourhood) or _ADDRESS_AFTER_RE.match(
+            text_nolinks[m.end() : m.end() + 60]
+        ):
+            continue
+        if _hyphen_half(text_nolinks, m):
             continue
         candidates.append(token)
     if not candidates:
