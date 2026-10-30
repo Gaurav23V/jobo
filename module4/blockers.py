@@ -77,12 +77,29 @@ _ESCALATED_BUDGET_STILL_EXHAUSTED = re.compile(
     rf"ran out of step budget \({agent_driver.AGENT_STEPS_ESCALATED} model steps\)"
 )
 
+# A photo of the candidate. G skips forms that require one (GHO-60), so these
+# are a policy skip, not a stuck job. The agent words it many ways: "photo
+# image upload" (Workable 3096), "Candidate Photo" upload (Deloitte 1590),
+# "passport-style photo", "profile picture upload", "upload a headshot".
+_PHOTO = (
+    r"(?:photo(?:graph)?|picture|image)[\"'”’]?(?: image| file)? upload|"
+    r"upload (?:of )?(?:a |an |your )?(?:photo(?:graph)?|picture|headshot)|"
+    r"passport[- ](?:style|size|sized) (?:photo(?:graph)?|picture)|candidate photo(?:graph)?|headshot"
+)
 _PERSONAL_DATA = re.compile(
     r"\b(?:date of birth|d\.?o\.?b\.?|pan(?: card| number)?|aadhaa?r|national (?:id|identifier)|"
-    r"social security|ssn|passport number|photo upload|headshot)\b",
+    rf"social security|ssn|passport number|{_PHOTO})\b",
     re.I,
 )
 _DEMANDS = re.compile(r"requir|mandat|compulsory|cannot (?:be )?(?:fabricat|invent)|not (?:in|present in|available in) (?:the )?candidate", re.I)
+_PHOTO_RE = re.compile(rf"\b(?:{_PHOTO})\b", re.I)
+PHOTO_SKIP_STATUS = "skipped: G decision (GHO-60): photo upload required"
+
+
+def photo_required(detail: str | None) -> bool:
+    """The form demands a photo of the candidate (skipped by G's GHO-60 rule)."""
+    d = detail or ""
+    return bool(_PHOTO_RE.search(d) and _DEMANDS.search(d))
 
 _EXTERNAL_IDENTITY_ONLY = re.compile(
     r"only (?:offers|supports|allows|accepts|has) (?:an? )?(?:oauth|google|sso|linkedin|microsoft|apple)|"
@@ -176,6 +193,22 @@ _PERSISTED = re.compile(
     re.I,
 )
 
+# A job page that offers no way at all to apply: no form, no apply button and
+# no email address (sedbox 2886, 2026-10-30: a Google Sites page holding only
+# the description). Closed, like a posting that says so itself (1940). The
+# agent must say it looked for an email too, and a page that did not render
+# (iframe, captcha, sign-in, a load failure) is never this.
+_NO_WAY_TO_APPLY = re.compile(
+    r"no (?:apply|application) (?:form|button|link|control)s?\b[^.;]{0,60}?\b(?:or|nor)\b "
+    r"(?:an? |any )?(?:apply |application |contact )?e-?mail\b",
+    re.I,
+)
+_PAGE_NOT_SEEN = re.compile(
+    r"iframe|embed|captcha|sign[- ]?in|log[- ]?in|did not (?:load|render)|failed to load|"
+    r"not load|blank|spinner|timed? ?out|blocked|error",
+    re.I,
+)
+
 _NO_WEB_FORM = re.compile(r"mailto:|no web (?:application )?form|apply by email only", re.I)
 _BOT_WALL = re.compile(r"cloudflare|bot[- ]protection|bot[- ]fingerprint", re.I)
 
@@ -233,6 +266,8 @@ def dead_listing_reason(status: str | None, detail: str | None, url: str | None 
     if (status or "").strip().lower() != "stuck":
         return None
     d = detail or ""
+    if _NO_WAY_TO_APPLY.search(d) and not _PAGE_NOT_SEEN.search(d):
+        return "job page has no apply form, button or email address"
     if not (_ZIPRECRUITER.search(d) or _ZIPRECRUITER.search(url or "")):
         return None
     if _SERVER_ERROR.search(d) and _PERSISTED.search(d):

@@ -659,6 +659,19 @@ def _send_parked_draft(session, job, parked: tuple[str, str], result: "Module4Re
     logger.info("[%s] SUBMITTED: parked email draft %s sent (gmail id %s).", jid, draft_id, mid)
 
 
+def _drop_not_retryable(session, job, detail: str, *, dry_run: bool) -> None:
+    """Take a job another attempt cannot fix out of the queue.
+
+    A form that demands a photo is skipped by G's rule (GHO-60), so it is
+    filed as a policy skip, not as stuck; the failure stays on the end.
+    """
+    if blockers.photo_required(detail):
+        prev = job.module4_last_status or ""
+        persist.mark_status(session, job, f"{blockers.PHOTO_SKIP_STATUS}; last attempt: {prev[:400]}",
+                            dry_run=dry_run)
+    persist.drop_permanently(session, job, dry_run=dry_run)
+
+
 def _drop_identity_wall(session, job, host: str, result: "Module4Result", *, dry_run: bool) -> None:
     """Drop a job on an identity-wall host (module4/identity_walls.py) without an agent."""
     status = identity_walls.status_for(host)
@@ -955,7 +968,7 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 continue
             perm = blockers.permanent_reason_from_last_status(job.module4_last_status)
             if perm:
-                persist.drop_permanently(session, job, dry_run=dry_run)
+                _drop_not_retryable(session, job, last_detail, dry_run=dry_run)
                 result.dropped += 1
                 result.permanent_blocked += 1
                 result.details.append(f"job_id={jid}: DROPPED, not retryable ({perm})")
@@ -1490,7 +1503,7 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             attempts = persist.record_failed_attempt(session, job, outcome, dry_run=dry_run)
             perm = blockers.permanent_reason(outcome.status, outcome.detail)
             if perm and attempts < constants.max_attempts_per_job():
-                persist.drop_permanently(session, job, dry_run=dry_run)
+                _drop_not_retryable(session, job, outcome.detail, dry_run=dry_run)
                 result.dropped += 1
                 result.permanent_blocked += 1
                 result.details.append(f"job_id={jid}: DROPPED, not retryable ({perm})")

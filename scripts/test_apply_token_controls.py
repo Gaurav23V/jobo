@@ -195,6 +195,28 @@ PERMANENT = [
     ("stuck", "Fabrikam portal requires signup gated by an email OTP wall that has already been confirmed non-functional/undeliverable on a prior retry"),
     ("stuck", "Myrtleby's application form requires mandatory 10th/12th/Graduation percentage+year fields not present in candidate facts or resume"),
     ("stuck", "Company career-page form's Cloudflare Turnstile widget errors out (600010) and never issues a token"),
+    # GHO-103: photo-required forms (G skips them, GHO-60), however worded.
+    ("stuck", "Tailspin's Workable form requires a photo image upload (input required=true, accept jpg/png/gif) which is not among the provided candidate files; resume already attached and all other fields filled."),
+    ("stuck", "Litware create-profile form requires a mandatory \"Candidate Photo\" upload (passport-style photo) to proceed past Personal Information; no photo asset exists for the candidate and none may be fabricated."),
+]
+# GHO-103: a photo the form merely offers, or a photo of something else, is
+# no reason to give up.
+PHOTO_REQUIRED_TOO = (
+    "Litware registration form requires a mandatory Candidate Photo (passport-style) upload with "
+    "input[type=file] required=true; no photo asset was provided for this candidate"
+)
+PHOTO_NOT_REQUIRED = [
+    "Optional profile picture upload skipped; Submit button stays disabled after the resume upload",
+    "Resume upload field rejects the PDF; only image upload formats are listed, form not submitted",
+]
+# GHO-103: verbatim from job 2886 (run 2026-10-30 10:00), host pseudonymised.
+NO_WAY_TO_APPLY = ("Northwind.example/careers/python-developer is a Google Sites page with only a job description; "
+                   "no apply form, button, or email address found on the page")
+APPLY_PATH_NOT_SEEN = [
+    # The page did not show its form: a retry (or a fix) can still get there.
+    "No apply form, button or email visible because the careers iframe did not load",
+    "No apply button found; the Apply link opens an external ATS that needs sign-in",
+    "no apply form or button found on the listing",
 ]
 # Permanent only while email apply is off (GHO-67); otherwise the retry lets
 # the agent report it as `email_apply`.
@@ -226,6 +248,16 @@ def test_blockers():
     with patch.dict(os.environ, {"JOBO_EMAIL_APPLY": "send"}):
         check("no web form: retryable with email apply on", blockers.permanent_reason(*NO_WEB_FORM) is None,
               f"got {blockers.permanent_reason(*NO_WEB_FORM)!r}")
+    for detail in [d for _, d in PERMANENT[-2:]] + [PHOTO_REQUIRED_TOO]:
+        check(f"photo required: {detail[:50]}...", blockers.photo_required(detail))
+    for detail in PHOTO_NOT_REQUIRED:
+        check(f"photo not required: {detail[:50]}...", not blockers.photo_required(detail))
+    check("no apply form, button or email -> dead listing",
+          blockers.dead_listing_reason("stuck", NO_WAY_TO_APPLY) is not None)
+    check("no apply form ... only from a stuck verdict", blockers.dead_listing_reason("failed", NO_WAY_TO_APPLY) is None)
+    for detail in APPLY_PATH_NOT_SEEN:
+        check(f"not a dead listing: {detail[:50]}...", blockers.dead_listing_reason("stuck", detail) is None,
+              repr(blockers.dead_listing_reason("stuck", detail)))
     check("stored status form parsed",
           blockers.permanent_reason_from_last_status("captcha_failed:hCaptcha grid") is not None)
     check("empty stored status is retryable", blockers.permanent_reason_from_last_status(None) is None)
@@ -454,6 +486,40 @@ def test_runner_controls():
               rows[22].module4_outcome != "closed" and rows[22].module4_attempts == 1,
               f"{rows[22].module4_outcome} attempts={rows[22].module4_attempts}")
         check("closed counter", result.closed == 2, str(result.closed))
+    finally:
+        session.close()
+        os.unlink(db)
+
+    # GHO-103: a photo-required form is a GHO-60 policy skip after ONE
+    # attempt, and a page with no way to apply is closed, both now and when
+    # already stored as stuck (jobs 3096 and 2886, 2026-10-30 10:00 run).
+    session, db = make_session()
+    photo = PERMANENT[-2][1]
+    try:
+        add_job(session, 30, url="https://apply.workable.com/tailspin/j/ABC123/")
+        add_job(session, 31, attempts=1, last_status=f"stuck:{photo}")
+        add_job(session, 32, url="https://northwind.example/careers/python-developer")
+        add_job(session, 33, attempts=1, last_status=f"stuck:{NO_WAY_TO_APPLY}")
+        outcomes = {
+            30: Outcome(status="stuck", detail=photo),
+            32: Outcome(status="stuck", detail=NO_WAY_TO_APPLY),
+        }
+        result, spawned = run_with(session, outcomes)
+        rows = {j.id: j for j in session.query(JobModel).all()}
+        check("photo-required -> skipped by policy after one attempt",
+              rows[30].module4_outcome == "skipped_by_policy" and rows[30].should_apply is False
+              and rows[30].module4_attempts == 1
+              and rows[30].module4_last_status.startswith(blockers.PHOTO_SKIP_STATUS)
+              and "photo image upload" in rows[30].module4_last_status,
+              f"{rows[30].module4_outcome} {rows[30].module4_last_status[:80]!r}")
+        check("stored photo-required stuck -> skipped by policy without an agent",
+              31 not in spawned and rows[31].module4_outcome == "skipped_by_policy"
+              and rows[31].should_apply is False, f"{rows[31].module4_outcome}")
+        check("no apply form, button or email -> closed, no attempt charged",
+              rows[32].module4_outcome == "closed" and rows[32].should_apply is False
+              and rows[32].module4_attempts == 0, f"{rows[32].module4_outcome} attempts={rows[32].module4_attempts}")
+        check("stored no-way-to-apply stuck -> closed without an agent",
+              33 not in spawned and rows[33].module4_outcome == "closed", f"{rows[33].module4_outcome}")
     finally:
         session.close()
         os.unlink(db)
