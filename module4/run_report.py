@@ -141,6 +141,9 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         ("widget:value_not_kept", "fixable",
          r"will not (?:commit|retain|register|accept|keep)|won t (?:commit|retain|select)"
          r"|not retain|invalid input|dropdown|combobox|autocomplete|radio"),
+        # A site that applies with its profile's resume, and this job's file
+        # could not be put in the profile first (GHO-106, hirist.tech).
+        ("upload:profile_only", "fixable", r"upload:profile_only"),
         ("upload:failed", "fixable", r"upload|dropzone|file input|file[- ]picker"),
         ("timeout", "temporary", r"timed out|timeout"),
         ("agent:no_verdict", "fixable", r"no verdict"),

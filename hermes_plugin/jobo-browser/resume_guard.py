@@ -60,6 +60,14 @@ violation. The veto now records it in a file next to the state file
 showing another job's file (or an older copy of this job's) and not ours is
 refused.
 
+A site that applies with its own profile's resume (GHO-106, job 3294 on
+hirist.tech, 2026-10-30): the job page's "Apply" opens a login popup, and
+entering the emailed code sends the application at once with whatever resume
+the candidate's hirist profile holds. The page has no resume field, so the
+rule above let "Apply" through. On PROFILE_RESUME_SITES an apply-like action
+is refused until this job's resume upload was verified (the agent uploads it
+to the profile first). A page that could not be read still counts by its URL.
+
 The driver passes, through the agent's environment:
   JOBO_UPLOAD_RESUME_NAME   the file name our upload carries for this job
   JOBO_RESUME_GUARD_FILE    JSON {"verified": bool, "resume_uploads_ok": int,
@@ -243,13 +251,29 @@ DISMISS_NAME = re.compile(_ROLE + r"(?:cancel|close|skip|dismiss|not now|(?:mayb
                           r"|" + _ROLE + r"[×✕✖xX]\s*$", re.I)
 _SCRIPT_DISMISS = re.compile(r"cancel|close|skip|dismiss", re.I)
 
+# Sites whose Apply sends the resume saved in the candidate's profile there
+# (no upload in the application itself). See the module docstring (GHO-106).
+PROFILE_RESUME_SITES: tuple[str, ...] = ("hirist.tech", "hirist.com")
+# Marks a judge_external reason as a profile-site refusal (picks the message).
+_PROFILE_REASON = "applies with the resume saved in the candidate's profile"
+
+
+def _host(url: str) -> str:
+    try:
+        return (urlsplit(str(url or "")).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+
 
 def is_linkedin(url: str) -> bool:
-    try:
-        host = (urlsplit(str(url or "")).hostname or "").lower()
-    except ValueError:
-        return False
+    host = _host(url)
     return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
+def profile_resume_site(url: str) -> str:
+    """The PROFILE_RESUME_SITES entry this URL belongs to, or ''."""
+    host = _host(url)
+    return next((s for s in PROFILE_RESUME_SITES if host and (host == s or host.endswith("." + s))), "")
 
 
 def judge(state: dict | None, expected: str, verified: bool) -> tuple[bool, str]:
@@ -315,6 +339,11 @@ def judge_external(states: list[dict], expected: str, guard: dict | None) -> tup
         if st.get("shown_ours") or st.get("ours_in_input"):
             return True, f"the page shows this job's own file {expected}"
     for st in states or []:
+        site = profile_resume_site(st.get("url", ""))
+        if site:
+            return False, (f"{site} {_PROFILE_REASON}, and this job's file {expected!r} was not "
+                           f"uploaded to the {site} profile first")
+    for st in states or []:
         if st.get("other_ours"):
             return False, (f"the page shows {', '.join(repr(n) for n in st['other_ours'])}, a resume "
                            f"uploaded for another job (or an older copy of this job's), not this job's file "
@@ -330,6 +359,19 @@ def judge_external(states: list[dict], expected: str, guard: dict | None) -> tup
 
 
 def refusal_message_external(reason: str, expected: str) -> str:
+    if _PROFILE_REASON in reason:
+        site = reason.split(" ", 1)[0]
+        return (
+            f"BLOCKED by jobo: Apply refused, resume not verified: {reason}. On {site} the Apply "
+            "button (and the login popup it opens, once the code is entered) sends the application "
+            "at once with whatever resume the profile holds. Do this instead: open the site's home "
+            f"page (not this job's page), log in there with the email code (NEED_OTP: {site}), open "
+            "the profile's resume section and end your turn with exactly\n"
+            "NEED_UPLOAD: resume\n"
+            f"After UPLOAD_DONE ({expected or 'this job’s resume'} is then the profile's resume) open "
+            "this job's page again and click Apply. If the profile upload fails, do NOT apply: print "
+            f"STATUS: stuck with DETAIL: upload:profile_only {site} and the upload error."
+        )
     return (
         f"BLOCKED by jobo: Submit refused, resume not verified: {reason}. The user's rule: every "
         f"application carries THIS job's own resume ({expected or 'resume_upload_name'}), "
@@ -443,8 +485,12 @@ def inspect_pages(base: str, point: list | None = None) -> list[dict]:
 
 
 def inspect_external(base: str, point: list | None, expected: str) -> list[dict]:
-    """Resume slots / our file on every non-LinkedIn page and frame target."""
+    """Resume slots / our file on every non-LinkedIn page and frame target.
+
+    Raises when a target cannot be read, unless a profile-resume site's page
+    is among them (that one is judged by its URL alone)."""
     out = []
+    error: Exception | None = None
     for t in _http_json(f"{base}/json/list"):
         if t.get("type") not in ("page", "iframe") or not t.get("webSocketDebuggerUrl"):
             continue
@@ -454,10 +500,20 @@ def inspect_external(base: str, point: list | None, expected: str) -> list[dict]
         # A point is in the page's viewport; a frame's own coordinates differ.
         pt = point if t.get("type") == "page" else None
         expr = f"({EXTERNAL_INSPECT_JS})({json.dumps([pt, expected])})"
-        raw = _ws_eval(t["webSocketDebuggerUrl"], expr)
+        try:
+            raw = _ws_eval(t["webSocketDebuggerUrl"], expr)
+        except Exception as e:
+            if not profile_resume_site(url):
+                error = error or e
+                continue
+            # A busy profile-resume page (3294's tab timed out a click) still
+            # counts by its URL: judge_external refuses Apply there.
+            raw = json.dumps({"external": True, "url": url, "unread": True})
         state = json.loads(raw) if isinstance(raw, str) else {"external": False}
         state["target_id"] = t.get("id", "")
         out.append(state)
+    if error and not any(profile_resume_site(s.get("url", "")) for s in out):
+        raise error
     return out
 
 

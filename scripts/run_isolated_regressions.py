@@ -91,6 +91,7 @@ SUITES = (
     'test_otp_spam_vendor_domain',
     'test_cv_dialog_upload',
     'test_oracle_cx_select',
+    'test_profile_resume_site',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',
@@ -110,6 +111,7 @@ SELF_ISOLATED = {
     'test_upload_panels_postback',
     'test_cv_dialog_upload',
     'test_oracle_cx_select',
+    'test_profile_resume_site',
 }
 UNITTEST_SUITES = {'test_clicker', 'test_upload_stability', 'test_field_clear',
                    'test_workday_click_filter', 'test_workday_create_account'}

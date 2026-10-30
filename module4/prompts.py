@@ -719,6 +719,21 @@ one, follow its note instead of exploring from scratch.
   native file input with no id or class. NEED_UPLOAD finds it by shape.
 - **Oracle Cloud Recruiting**: multi-step with email verification. Codes are
   retrievable via NEED_OTP. Expect several steps; keep moving.
+- **hirist.tech (LinkedIn "Apply on company website" lands here)**: the
+  application has no upload step; it sends the resume saved in the
+  candidate's hirist profile. "Apply" on the job page opens a login popup,
+  and entering the emailed code there SENDS the application at once with the
+  old profile resume. So never click Apply first. Open
+  https://www.hirist.tech/ (the home page), click Login, request the email
+  code and ask `NEED_OTP: hirist.tech`. Signed in, open the profile's resume
+  section (https://www.hirist.tech/myprofile, Resume "(Edit)") and ask
+  `NEED_UPLOAD: resume`; the profile saves the file at once ("Your resume has
+  been uploaded to your profile successfully!"). After UPLOAD_DONE, open this
+  job's page again and click Apply, then answer any screening questions it
+  shows. The pipeline refuses Apply on hirist until this job's resume upload
+  is verified. If the profile upload keeps failing, do NOT apply: report
+  STATUS: stuck with DETAIL: upload:profile_only hirist.tech and the upload
+  error.
 
 ## Final answer format (MANDATORY)
 End your response with exactly these lines, in this order:
