@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from db.models import JobModel
-from module4 import captcha_walls, email_apply, persist
+from module4 import address_wall, captcha_walls, email_apply, persist
 from policy import employer_blocklist, paused_sites
 
 
@@ -69,6 +69,8 @@ def list_jobs_to_apply(
             r for r in rows
             if not paused_sites.still_paused(r.module4_last_status)
             and not captcha_walls.is_parked(r.module4_last_status)
+            # A required street address / postal code (address_wall.py).
+            and not address_wall.is_parked(r.module4_last_status)
             # A parked email draft waits for draft mode to end (email_apply.py).
             and not (email_apply.is_parked(r.module4_last_status) and email_apply.mode() != "send")
         ]

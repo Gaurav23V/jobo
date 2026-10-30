@@ -83,6 +83,11 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
          r"\bpan\b|aadhaa?r|date of birth|\bdob\b|national (?:id|identifier)|passport number"
          r"|social security|\bmarks\b|\bcgpa\b|\bgpa\b|percentage"),
         ("personal:photo", "needs_g", r"\bphoto|headshot|photograph"),
+        # A required street address / postal code (module4/address_wall.py):
+        # parked as needs_address, or an older stuck row in the same words.
+        ("personal:address", "needs_g",
+         r"^needs_address\b|(?:street address|address line|zip|postal code|pin code)\b[^.]{0,200}?"
+         r"\b(?:not|neither|none)\b[^.]{0,60}?\bin (?:the )?candidate facts"),
         ("personal:disclosures", "needs_g", r"conflict[- ]of[- ]interest|disclosures"),
         ("signin:linkedin", "needs_g",
          r"linkedin (?:login|log in|sign[- ]?in|requires (?:a )?sign|job requires sign)|linkedin credentials"),

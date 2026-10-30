@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-from module4 import agent_driver, captcha_walls, google_forms
+from module4 import address_wall, agent_driver, captcha_walls, google_forms
 
 # status values that are permanent on their own
 _PERMANENT_STATUSES = {
@@ -100,6 +100,15 @@ def photo_required(detail: str | None) -> bool:
     """The form demands a photo of the candidate (skipped by G's GHO-60 rule)."""
     d = detail or ""
     return bool(_PHOTO_RE.search(d) and _DEMANDS.search(d))
+
+
+def address_park(detail: str | None) -> bool:
+    """The form stops on a street address / postal code the candidate facts
+    lack, and on nothing a G answer about the address would not clear: a
+    photo, date of birth or ID number it also demands keeps its own verdict.
+    Parked, not dropped (module4/address_wall.py)."""
+    d = detail or ""
+    return address_wall.is_address_wall(d) and not (_PERSONAL_DATA.search(d) and _DEMANDS.search(d))
 
 _EXTERNAL_IDENTITY_ONLY = re.compile(
     r"only (?:offers|supports|allows|accepts|has) (?:an? )?(?:oauth|google|sso|linkedin|microsoft|apple)|"
@@ -234,6 +243,8 @@ def permanent_reason(status: str | None, detail: str | None) -> str | None:
         return f"{st}: retries meet the same challenge"
     if _ESCALATED_BUDGET_STILL_EXHAUSTED.search(d):
         return "form still exceeds the escalated step budget: a further retry gets the identical budget and the same result"
+    if address_park(d):
+        return None  # parked, not dropped: see module4/address_wall.py
     if _PERSONAL_DATA.search(d) and _DEMANDS.search(d):
         return "form requires personal data that is not in the candidate facts"
     if _MISSING_FACT.search(d):

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from db.models import JobModel
-from module4 import blockers, captcha_walls, circuit_breaker, constants, preflight, query, routing
+from module4 import address_wall, blockers, captcha_walls, circuit_breaker, constants, preflight, query, routing
 from policy import employer_blocklist, paused_sites
 
 WORKER_LINKEDIN_ROUTES = "linkedin worker (routes the listing)"
@@ -71,6 +71,8 @@ def _filtered_reason(job: JobModel) -> str:
         return f"blocked employer ({reason})"
     if captcha_walls.is_parked(job.module4_last_status):
         return "parked behind an hCaptcha sign-in wall"
+    if address_wall.is_parked(job.module4_last_status):
+        return "parked: form requires a street address / postal code (needs G)"
     return "filtered by the apply queue"
 
 

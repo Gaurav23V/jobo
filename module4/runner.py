@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from db.models import JobModel
 from module4 import (
+    address_wall,
     agent_driver,
     blockers,
     browser_session,
@@ -300,6 +301,10 @@ class Module4Result:
     # Lever site (module4/captcha_walls.py):
     # kept in the queue, no attempt charged, skipped by later runs.
     captcha_parked: int = 0
+    # A required street address / postal code the candidate facts lack
+    # (module4/address_wall.py): kept in the queue, no attempt charged,
+    # skipped by later runs until G's answer is in the facts.
+    address_parked: int = 0
     # Mailto-only postings (module4/email_apply.py): applications sent by
     # email (also counted in `submitted`), and drafts parked for the
     # candidate to read first (no attempt charged).
@@ -672,6 +677,14 @@ def _drop_not_retryable(session, job, detail: str, *, dry_run: bool) -> None:
     persist.drop_permanently(session, job, dry_run=dry_run)
 
 
+def _park_address(session, job, detail: str, result: "Module4Result", *, dry_run: bool) -> None:
+    """Park a job whose form needs a street address / postal code (GHO-109)."""
+    persist.mark_status(session, job, address_wall.status_for(detail), dry_run=dry_run)
+    result.address_parked += 1
+    result.details.append(f"job_id={job.id}: PARKED, required street address / postal code not in candidate facts")
+    logger.info("[%s] Parked (no attempt charged): form requires a street address / postal code.", job.id)
+
+
 def _drop_identity_wall(session, job, host: str, result: "Module4Result", *, dry_run: bool) -> None:
     """Drop a job on an identity-wall host (module4/identity_walls.py) without an agent."""
     status = identity_walls.status_for(host)
@@ -952,6 +965,13 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 continue
             logger.info("[%s] Google Form job released: %s.", jid, release)
 
+        # Parked on a required street address / postal code (GHO-109): waits
+        # for scripts/requeue_address_parked.py, not for another agent run.
+        if not force and address_wall.is_parked(job.module4_last_status):
+            result.address_parked += 1
+            result.details.append(f"job_id={jid}: PARKED, required street address / postal code not in candidate facts")
+            continue
+
         # A job whose last failure was a wall another attempt cannot get past
         # (captcha, required DOB/PAN, Google-only sign-in, dead account) is
         # dropped here without spawning an agent. 35% of all apply tokens to
@@ -965,6 +985,9 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 result.closed += 1
                 result.details.append(f"job_id={jid}: closed, not retried ({gone})")
                 logger.info("[%s] Not retrying, listing is gone: %s.", jid, gone)
+                continue
+            if blockers.address_park(last_detail):
+                _park_address(session, job, last_detail, result, dry_run=dry_run)
                 continue
             perm = blockers.permanent_reason_from_last_status(job.module4_last_status)
             if perm:
@@ -1498,6 +1521,9 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 f"job_id={jid}: PARKED, Google Form needs a signed-in Google account ({form_url})"
             )
             logger.info("[%s] Parked (no attempt charged): Google Form %s needs sign-in.", jid, form_url)
+        elif blockers.address_park(outcome.detail):
+            # The same field stops every attempt: park it, charge nothing.
+            _park_address(session, job, outcome.detail, result, dry_run=dry_run)
         else:
             circuit_breaker.record_failure(job.job_url, jid, outcome.detail)
             attempts = persist.record_failed_attempt(session, job, outcome, dry_run=dry_run)
@@ -1538,7 +1564,7 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
     logger.info(
         "Apply stage totals: attempted=%d SUBMITTED=%d closed=%d already_applied=%d "
         "failed=%d dropped=%d (not retryable=%d) paused=%d google_signin_parked=%d "
-        "captcha_parked=%d circuit_broken=%d preflight_closed=%d",
+        "captcha_parked=%d address_parked=%d circuit_broken=%d preflight_closed=%d",
         result.attempted,
         result.submitted,
         result.closed,
@@ -1549,6 +1575,7 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
         result.paused,
         result.google_signin_parked,
         result.captcha_parked,
+        result.address_parked,
         result.circuit_broken,
         result.preflight_closed,
     )

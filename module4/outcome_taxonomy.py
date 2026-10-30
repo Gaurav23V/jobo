@@ -28,7 +28,8 @@ data/jobs.db (2026-10-14), not guessed:
     `failed:...`, and any future prefix not listed above) is a genuine
     attempt that did not reach a terminal success - `stuck`. That includes
     `captcha_wall:...` (module4/captcha_walls.py): parked, but a wall the site
-    put up, not a choice.
+    put up, not a choice. So is `needs_address:...` (module4/address_wall.py):
+    parked until G gives a street address, not a choice either.
   - A null status (and `applied=False`) means the job was never attempted:
     `not_attempted`.
 """

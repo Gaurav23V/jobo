@@ -420,6 +420,11 @@ def apply(
                 f"  hCaptcha walls:     {result.captcha_parked} "
                 "(module4/captcha_walls.py; parked, no attempt charged)"
             )
+        if result.address_parked:
+            click.echo(
+                f"  Address required:   {result.address_parked} "
+                "(module4/address_wall.py; parked for G, no attempt charged)"
+            )
         if result.emailed or result.email_drafted:
             click.echo(
                 f"  By email:           {result.emailed} sent, {result.email_drafted} "
