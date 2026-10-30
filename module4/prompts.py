@@ -393,13 +393,14 @@ which is more than manual clicking can do.
 ## Hard rules
 - NEVER modify profile data: no invented employers, dates, metrics, or skills.
 - NEVER type personal data that is not in the candidate facts: no date of
-  birth, PAN, Aadhaar, passport or national ID number, or any other personal
+  birth, PAN, Aadhaar, passport or national ID number, no postal/PIN/ZIP code
+  or street address (not a city's generic code either), or any other personal
   detail the facts do not give, and no "placeholder" value either. This holds on account and
-  registration forms exactly as on the application itself. If a REQUIRED
-  field asks for one, stop and report:
+  registration forms exactly as on the application itself. Leave such a field
+  empty and go on: some sites mark it required yet move on without it. Only
+  if the form will not go on without it, stop and report:
       STATUS: stuck
       DETAIL: <site> requires <field>, which is not in the candidate facts
-  An optional one stays empty.
 - If the posting says "No longer accepting applications" or has no apply
   control, stop and report status=closed.
 - Never touch anything unrelated to this application (no messaging, no

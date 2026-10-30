@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from module4 import captcha_walls, email_apply, submission_audit
-from policy import personal
+from policy import made_up_values, personal
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,11 @@ MAX_ALREADY_REFUNDS = 3
 # Long ATS forms legitimately have many awkward dropdowns; this is a
 # safety net against a looping agent, not a budget.
 MAX_FIELD_ROUNDS = 25
+# A set that fills a field not set before is progress, not a loop, so it is
+# not charged to MAX_FIELD_ROUNDS (up to this many). Larkspur 3015 (Oracle,
+# 2026-10-30) hit the cap on its 16th straight yes/no answer, with each one
+# set first time, and the rest of the page had to be done by hand.
+MAX_NEW_FIELD_REFUNDS = 60
 # Per-FIELD strike limit. The global cap above is far too loose to stop the
 # real failure: one stubborn control eating an entire budget (job99997 spent
 # nine rounds on a single college dropdown). Three honest attempts at one
@@ -1070,6 +1075,15 @@ def _resolve_field(
         f"#{index}" if index else repr(field_hint),
         value,
     )
+    refused = _made_up_value_refusal(cdp_url, field_hint, value, index, form_filler=form_filler)
+    if refused:
+        failures[key] = failures.get(key, 0) + 1
+        logger.warning(
+            "[%s] Field set refused for %s: a made-up value not in the candidate facts.",
+            job_id,
+            key,
+        )
+        return f"FIELD_SET_REFUSED: {refused}"
     try:
         result = form_filler.set_field(cdp_url, field_hint, value, index=index)
     except Exception as e:
@@ -1115,6 +1129,21 @@ def _resolve_field(
 
 def _norm_option(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip().lower()
+
+
+def _made_up_value_refusal(
+    cdp_url: str, field_hint: str, value: str, index: int | None, *, form_filler
+) -> str:
+    """The agent message when `value` is a postal code or street number the
+    candidate facts do not give (policy/made_up_values.py), else ""."""
+    try:
+        listed = form_filler.listed_field(cdp_url, index)
+    except Exception:
+        listed = None
+    label = listed[1] if listed else ("" if index else field_hint)
+    facts = personal.candidate_facts() + "\n" + json.dumps(personal.candidate())
+    kind = made_up_values.refusal(label, value, facts)
+    return made_up_values.agent_message(kind, label, value) if kind else ""
 
 
 _PASSWORD_LABEL_RE = re.compile(r"pass\s*word|passcode|\bpwd\b", re.I)
@@ -1565,6 +1594,7 @@ def _run_apply_agent(
     field_rounds = 0
     field_list_rounds = 0
     stale_refunds = 0
+    new_field_refunds = 0
     auto_relists = 0
     reset_rounds = 0
     click_rounds = 0
@@ -1778,8 +1808,12 @@ def _run_apply_agent(
                 field_rounds += 1
                 reply = _resolve_field(line, cdp_url=cdp_url, job_id=job_id, failures=field_failures)
                 replies.append(reply)
-                for label in _FIELD_SET_LABEL_RE.findall(reply):
+                new_labels = [x for x in _FIELD_SET_LABEL_RE.findall(reply) if x not in fields_set_at]
+                for label in new_labels:
                     fields_set_at.setdefault(label, sum(calls_by_session.values()))
+                if new_labels and new_field_refunds < MAX_NEW_FIELD_REFUNDS:
+                    field_rounds -= 1
+                    new_field_refunds += 1
                 if FIELD_MOVED_NOTE in reply:
                     form_changed = True
                 elif FORM_CHANGED_NOTE in reply:

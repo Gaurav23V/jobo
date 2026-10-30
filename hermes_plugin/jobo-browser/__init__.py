@@ -10,6 +10,8 @@
                          resume card is the selected one
   * workday_guard.py   - no Workday Save and Continue while a required field
                          is unanswered; names what the site still flags (GHO-72)
+  * fact_guard.py      - no typed postal code or street number that is not in
+                         the candidate facts (GHO-101)
   * after_action.py    - click/scroll/press results carry the page after the
                          action, so the agent does not spend a model call on
                          a bare browser_snapshot (GHO-15)
@@ -43,6 +45,7 @@ captcha_guard = _load("jobo_browser_captcha_guard", "captcha_guard.py")
 click_scroller = _load("jobo_browser_click_scroller", "click_scroller.py")
 resume_guard = _load("jobo_browser_resume_guard", "resume_guard.py")
 workday_guard = _load("jobo_browser_workday_guard", "workday_guard.py")
+fact_guard = _load("jobo_browser_fact_guard", "fact_guard.py")
 after_action = _load("jobo_browser_after_action", "after_action.py")
 
 
@@ -132,6 +135,10 @@ def _pre_tool_call(tool_name=None, args=None, task_id=None, api_request_id=None,
             return {"action": "block", "message": message}
         message = workday_guard.check_tool_call(tool_name or "", args, _ref_name)
         if message:
+            return {"action": "block", "message": message}
+        message = fact_guard.check_tool_call(tool_name or "", args, _ref_name)
+        if message:
+            logger.warning("jobo-browser fact guard blocked %s: %s", tool_name, message[:100])
             return {"action": "block", "message": message}
         rewrite = account_guard.password_rewrite(tool_name or "", args)
         if rewrite:

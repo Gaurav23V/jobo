@@ -895,15 +895,26 @@ __COLLECT__
     const sels = ['[role=option]', '.select__option', '[class*="-option"]',
                   '.select2-results__option', '.chosen-results li'];
     const seenO = new Set(), found = [];
-    for (const s of sels) {
-      document.querySelectorAll(s).forEach(o => {
-        if (seenO.has(o)) return;
-        const r = o.getBoundingClientRect();
-        if (r.width === 0 && r.height === 0) return;   // not actually shown
-        seenO.add(o);
-        found.push(o);
-      });
+    const add = o => {
+      if (seenO.has(o)) return;
+      const r = o.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return;   // not actually shown
+      seenO.add(o);
+      found.push(o);
+    };
+    // Oracle Recruiting CX's cx-select (Larkspur 3015, GHO-101) renders its
+    // options as role=gridcell rows of a role=grid list, portalled to <body>
+    // and tied to the input only by aria-controls. Every Pin Code, State and
+    // Degree pick there came back "no options". A gridcell anywhere else
+    // (calendars, tables) is not an option, so only the linked list counts.
+    const root = el.getRootNode();
+    const linked = ((el.getAttribute('aria-controls') || '') + ' ' +
+                    (el.getAttribute('aria-owns') || '')).split(/\s+/).filter(Boolean);
+    for (const id of linked) {
+      const list = root.getElementById ? root.getElementById(id) : document.getElementById(id);
+      if (list) list.querySelectorAll('[role=option], [role=gridcell]').forEach(add);
     }
+    for (const s of sels) document.querySelectorAll(s).forEach(add);
     return found;
   };
 
@@ -1287,7 +1298,9 @@ class ListFieldsResult:
         lines.append("\n" + self.required_summary())
         lines.append(
             "\nSet one with its NUMBER, e.g. `NEED_FIELD: #3 = India`. The number "
-            "is exact - no guessing, no wrong-field risk. One field per directive."
+            "is exact - no guessing, no wrong-field risk. One field per "
+            "`NEED_FIELD:` line; put every field you can answer from this list on "
+            "its own line in ONE reply (they all run, in order)."
         )
         return "\n".join(lines)
 

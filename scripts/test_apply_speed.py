@@ -170,7 +170,7 @@ def test_plugin_wiring():
 VERDICT = "STATUS: submitted\nDETAIL: Application submitted.\nFIELDS_FILLED_JSON: {}\n"
 
 
-def _drive(rounds: list[str]):
+def _drive(rounds: list[str], reply=None):
     calls, sets = [], []
 
     def run_hermes(*, prompt, cdp_url, timeout_sec, max_turns, resume_session=None, source_url=""):
@@ -180,7 +180,7 @@ def _drive(rounds: list[str]):
 
     def resolve_field(line, *, cdp_url, job_id, failures):
         sets.append(line.strip())
-        return f"FIELD_SET: {line.split(':', 1)[1].strip()}"
+        return reply(line) if reply else f"FIELD_SET: {line.split(':', 1)[1].strip()}"
 
     saved = (agent_driver._run_hermes, agent_driver._resolve_field, agent_driver._dump_debug_transcript,
              agent_driver.session_api_calls)
@@ -208,10 +208,19 @@ def test_field_batch():
           len(calls) == 2 and calls[1].count("FIELD_SET:") == 3 and out.status == "submitted", str(calls[1:])[:200])
     out, calls, sets = _drive(["session_id: s1\nNEED_FIELD: #2 = LIIT Springfield\n", "session_id: s1\n" + VERDICT])
     check("a single NEED_FIELD still works as before", sets == ["NEED_FIELD: #2 = LIIT Springfield"] and len(calls) == 2)
-    many = "session_id: s1\n" + "".join(f"NEED_FIELD: #{i} = v{i}\n" for i in range(1, agent_driver.MAX_FIELD_ROUNDS + 4))
+    # The cap charges requests that set no new field (GHO-101); first-time
+    # sets are refunded, up to MAX_NEW_FIELD_REFUNDS. Neither lets a batch
+    # run unbounded.
+    cap, refunds = agent_driver.MAX_FIELD_ROUNDS, agent_driver.MAX_NEW_FIELD_REFUNDS
+    many = "session_id: s1\n" + "".join(f"NEED_FIELD: #{i} = v{i}\n" for i in range(1, cap + 4))
+    out, calls, sets = _drive([many, "session_id: s1\n" + VERDICT],
+                              reply=lambda line: "FIELD_SET_FAILED: no matching option")
+    check(f"the {cap}-set cap still holds inside one batch",
+          len(sets) == cap and "request limit reached" in calls[1], str(len(sets)))
+    many = "session_id: s1\n" + "".join(f"NEED_FIELD: #{i} = v{i}\n" for i in range(1, cap + refunds + 4))
     out, calls, sets = _drive([many, "session_id: s1\n" + VERDICT])
-    check(f"the {agent_driver.MAX_FIELD_ROUNDS}-set cap still holds inside one batch",
-          len(sets) == agent_driver.MAX_FIELD_ROUNDS and "request limit reached" in calls[1], str(len(sets)))
+    check(f"first-time sets in one batch stop at {cap} + {refunds} refunded",
+          len(sets) == cap + refunds and "request limit reached" in calls[1], str(len(sets)))
     out, calls, sets = _drive(["session_id: s1\nNEED_FIELD: #1 = a\nSTATUS: stuck\nDETAIL: x\nFIELDS_FILLED_JSON: {}\n"])
     check("a STATUS line still beats NEED_FIELD lines", not sets and out.status == "stuck")
     check("prompt tells the agent to batch NEED_FIELD lines and that clicks return the page",

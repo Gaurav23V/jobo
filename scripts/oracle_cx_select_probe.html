@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Oracle Recruiting CX cx-select probe (GHO-101)</title>
+<!--
+  Local copy of the shape of Oracle Recruiting Cloud Candidate Experience's
+  "cx-select" dropdown (static.oracle.com/cdn/fa/oj-hcm-ce/.../main-minimal.js,
+  read 2026-10-30), as used for Pin Code / State / Degree on the Larkspur 3015
+  application:
+
+    <input class="cx-select-input" role="combobox" aria-autocomplete="list"
+           aria-haspopup="grid" aria-controls="<id>-listbox" aria-expanded=...>
+    <button id="<id>-toggle-button" aria-label="Open the drop-down list for X.">
+
+  The list is portalled to <body>:
+    div.cx-select__options > div.cx-select-container.cx-select-dropdown--open
+      > div.cx-select__listbox#<id>-listbox-container
+        > div.cx-select__list[role=grid]#<id>-listbox   (role=status while loading)
+          > div[role=row] > div[role=gridcell].cx-select__list-item#<id>-listitem-N
+
+  Typing (input event) filters the list; a click on a gridcell commits the
+  value to the component's own state. The input is controlled: on blur it is
+  re-rendered from that state, so typed text that was never picked is lost.
+  State is a remote lookup (loading row first). A visible unrelated grid
+  ("Recent searches") holds gridcells too and must never be picked from.
+-->
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .row { margin: 14px 0; }
+  .cx-select__options { position: absolute; background: #fff; border: 1px solid #888; z-index: 10; }
+  .cx-select__list-item { padding: 4px 8px; cursor: pointer; }
+  .recent td { padding: 3px 8px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+<h1>AI Engineer application, step 1 of 4</h1>
+<form id="form">
+  <div class="row"><label for="city">City or Town</label> <input id="city" name="city" type="text" required></div>
+  <div class="row" data-cx="pin"></div>
+  <div class="row" data-cx="state"></div>
+  <div class="row" data-cx="degree"></div>
+</form>
+
+<table class="recent" role="grid" aria-label="Recent searches">
+  <tr role="row"><td role="gridcell">Bachelor of Technology - BTech (saved search)</td><td role="gridcell">Lakeshore State</td></tr>
+</table>
+
+<script>
+const DATA = {
+  pin: {label: 'Pin Code', required: true, options: ['10001', '10002', '10003']},
+  state: {label: 'State', required: true, remote: true,
+          options: ['Inland State', 'Lakeshore', 'Northern Plains', 'River Valley']},
+  degree: {label: 'Degree', required: true, options: [
+    "Associate's Degree", 'Bachelor of Arts - BA', 'Bachelor of Engineering - BE',
+    'Bachelor of Science - BS', 'Bachelor of Technology - BTech', "Bachelor's Degree",
+    'Master of Science - MS', "Master's Degree", 'Other']},
+};
+window.committed = {};
+window.clicks = {};
+
+function mount(id) {
+  const spec = DATA[id];
+  const host = document.querySelector('[data-cx="' + id + '"]');
+  host.innerHTML =
+    '<span id="labelText-' + id + '">' + spec.label + (spec.required ? ' *' : '') + '</span>' +
+    '<div class="cx-select-container"><div class="input-field-container">' +
+    '<div class="input-field-container__left">' +
+    '<input id="' + id + '" name="' + id + '" class="cx-select-input" type="text" role="combobox" ' +
+    'aria-autocomplete="list" aria-haspopup="grid" aria-controls="' + id + '-listbox" ' +
+    'aria-expanded="false" aria-required="' + spec.required + '" aria-labelledby="labelText-' + id + '" ' +
+    (spec.required ? 'required ' : '') + 'autocomplete="none"></div>' +
+    '<div class="input-field-container__right"><button type="button" class="icon-dropdown-arrow" ' +
+    'id="' + id + '-toggle-button" tabindex="-1" aria-controls="' + id + '-listbox" ' +
+    'aria-label="Open the drop-down list for ' + spec.label + '.">v</button></div></div></div>';
+  const input = document.getElementById(id);
+  let portal = null, query = '', timer = null;
+
+  const close = () => {
+    if (portal) portal.remove();
+    portal = null;
+    input.setAttribute('aria-expanded', 'false');
+  };
+  const render = (loading) => {
+    if (!portal) {
+      portal = document.createElement('div');
+      portal.className = 'cx-select__options';
+      const r = input.getBoundingClientRect();
+      portal.style.left = (r.left + scrollX) + 'px';
+      portal.style.top = (r.bottom + scrollY) + 'px';
+      document.body.appendChild(portal);
+    }
+    input.setAttribute('aria-expanded', 'true');
+    const shown = spec.options.filter(o => o.toLowerCase().includes(query.toLowerCase()));
+    let rows;
+    if (loading) rows = '<div class="cx-select__list-item--loading">Loading</div>';
+    else if (!shown.length) rows = '<div class="cx-select__list-item--no-results">No results</div>';
+    else rows = shown.map((o, i) =>
+      '<div role="row"><div tabindex="-1" role="gridcell" id="' + id + '-listitem-' + i +
+      '" class="cx-select__list-item" data-value="' + o + '"><div class="cx-select__list-item-container">' +
+      o + '</div></div></div>').join('');
+    portal.innerHTML =
+      '<div class="cx-select-container cx-select-dropdown--open">' +
+      '<div class="cx-select__listbox" id="' + id + '-listbox-container">' +
+      '<div class="cx-select__list" role="' + (loading || !shown.length ? 'status' : 'grid') +
+      '" id="' + id + '-listbox" tabindex="-1">' + rows + '</div></div></div>';
+    const list = portal.querySelector('.cx-select__list');
+    list.addEventListener('mousedown', e => e.preventDefault());
+    portal.querySelectorAll('[role=gridcell]').forEach(cell => cell.addEventListener('click', () => {
+      window.committed[id] = cell.dataset.value;
+      window.clicks[id] = (window.clicks[id] || 0) + 1;
+      input.value = cell.dataset.value;
+      query = '';
+      close();
+    }));
+  };
+  const open = () => {
+    if (spec.remote) {
+      render(true);
+      clearTimeout(timer);
+      timer = setTimeout(() => render(false), 400);
+    } else render(false);
+  };
+  input.addEventListener('click', () => { if (!portal) open(); });
+  document.getElementById(id + '-toggle-button').addEventListener('click', () => portal ? close() : open());
+  input.addEventListener('input', () => { query = input.value; open(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (document.activeElement === input) return;
+      input.value = window.committed[id] || '';
+      query = '';
+      close();
+    }, 150);
+  });
+}
+Object.keys(DATA).forEach(mount);
+</script>
+</body>
+</html>
