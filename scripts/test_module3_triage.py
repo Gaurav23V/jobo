@@ -162,6 +162,59 @@ def test_splice():
             check(label, True)
 
 
+def test_line_budget():
+    print("\n[1b] line budget: Skills lines and bullets no longer than the base's (GHO-104)")
+    blocks = resume_splice.editable_blocks(BASE_TEX)
+    skills, projects = blocks["Programming Skills"], blocks["Projects"]
+    lines = resume_splice.item_texts(skills)
+    check("printed text drops markup, keeps escapes",
+          lines[0].startswith("Languages & Frameworks: Python,") and "\\" not in lines[0] and "{" not in lines[0],
+          repr(lines[0]))
+    bullets = resume_splice.item_texts(projects)
+    check("project bullets found, titles and links not counted",
+          len(bullets) == 4 and not any("github" in b.lower() for b in bullets), str(bullets))
+    budget = resume_splice.line_budget(BASE_TEX)
+    check("budget measured from the base",
+          budget == resume_splice.LineBudget(
+              skills_lines=len(lines), skills_chars=max(map(len, lines)),
+              bullets=4, bullet_chars=max(map(len, bullets))), str(budget))
+    check("base blocks are within budget", resume_splice.over_budget(skills, projects, budget) == [])
+
+    long_line = skills.replace(", Docker}", ", Docker, Kafka, Kubernetes}", 1)
+    problems = resume_splice.over_budget(long_line, "", budget)
+    check("over-long Skills line named", len(problems) == 1 and "Tools & Platforms" in problems[0]
+          and f"max {budget.skills_chars}" in problems[0], str(problems))
+    check("trim drops the last entries until the line fits",
+          resume_splice.trim_skills(long_line, budget.skills_chars) == skills)
+    # "AWS (SQS, Lambda, S3)" is one entry: never cut inside the parentheses.
+    tight = resume_splice.trim_skills(long_line, len("Tools & Platforms: PostgreSQL, Redis, AWS (SQS, Lambda, S3)"))
+    check("trim keeps parenthesised entries whole",
+          "AWS (SQS, Lambda, S3)}" in tight and "Git" not in tight.split("Tools")[1], tight)
+    check("trim leaves lines within budget alone",
+          resume_splice.trim_skills(skills, budget.skills_chars) == skills)
+    check("trimmed block still splices", "Kafka" not in resume_splice.splice(
+        BASE_TEX, {"Programming Skills": resume_splice.trim_skills(long_line, budget.skills_chars)}))
+    unbraced = "\\section{Programming Skills}\n\\begin{itemize}\n\\item \\textbf{Tools}: Git, Docker, Kafka, Redis, Linux, Bash, Make, Nginx, Kubernetes, Terraform, Helm, Vault, Consul, Nomad\n\\end{itemize}"
+    trimmed = resume_splice.trim_skills(unbraced, budget.skills_chars)
+    check("trim works on a line without a value group",
+          len(resume_splice.item_texts(trimmed)[0]) <= budget.skills_chars and trimmed.endswith("\\end{itemize}")
+          and "Tools}: Git, Docker" in trimmed, trimmed)
+
+    long_bullet = projects.replace("Added a monthly summary", "Added a monthly summary " + "and more " * 30, 1)
+    problems = resume_splice.over_budget("", long_bullet, budget)
+    check("over-long bullet named", len(problems) == 1 and problems[0].startswith('Projects bullet "Added a monthly'),
+          str(problems))
+    extra_bullet = projects.replace("\\end{itemize}", "  \\item One more bullet.\n      \\end{itemize}", 1)
+    check("extra bullet counted", resume_splice.over_budget("", extra_bullet, budget)
+          == ["Projects has 5 bullets; the page holds 4."])
+
+    mats_sys = prompts.materials_system(introduction_markdown="intro", base_resume_latex=BASE_TEX)
+    check("materials prompt states the line budget on the first try",
+          f"at most {budget.skills_lines} lines" in mats_sys
+          and f"each at most {budget.skills_chars} characters" in mats_sys
+          and f"at most {budget.bullets} bullets in total, each at most {budget.bullet_chars} characters" in mats_sys)
+
+
 # --------------------------------------------------------------------------
 # build_fit_profile
 # --------------------------------------------------------------------------
@@ -335,7 +388,7 @@ def new_job(session, jid: int, company: str, title_suffix: str = "") -> JobModel
 
 
 # job_id -> scenario
-FIT_SCORES = {1: 4, 2: 1, 3: 5, 4: 4, 5: 4, 6: 4, 7: 5, 8: 4, 9: 4}  # 7 is an internship
+FIT_SCORES = {1: 4, 2: 1, 3: 5, 4: 4, 5: 4, 6: 4, 7: 5, 8: 4, 9: 4, 10: 4}  # 7 is an internship
 CLOSED = {3}
 
 
@@ -353,6 +406,15 @@ def _bloated_skills() -> str:
     shape all 11 default-resume fallbacks in Oct 2026 had)."""
     block = resume_splice.editable_blocks(BASE_TEX)["Programming Skills"]
     return block.replace(", Docker}", ", Docker, very long bullet of extra skills}", 1)
+
+
+def _extra_skills_line() -> str:
+    """The base Skills block plus a third, short line: within the per-line
+    character budget, so trimming entries cannot fix it, but a whole extra
+    printed line on a full page."""
+    block = resume_splice.editable_blocks(BASE_TEX)["Programming Skills"]
+    extra = "   \\item{\n     \\textbf{More}{: very long bullet}\n   }\n "
+    return block.replace("\\resumeSubHeadingListEnd", extra + "\\resumeSubHeadingListEnd", 1)
 
 
 def _tailored_projects() -> str:
@@ -405,26 +467,26 @@ def test_runner(real_pdf: bool):
         elif response_model is MaterialsOutput:
             projects = {1: _tailored_projects(), 4: _bloated_projects(), 5: _bloated_projects(),
                         6: _extra_project_block(bloat=True), 8: _tailored_projects(),
-                        9: _bloated_projects()}[jid]
-            skills = _bloated_skills() if jid in (8, 9) else ""
+                        9: _bloated_projects(), 10: _tailored_projects()}[jid]
+            skills = {8: _bloated_skills(), 9: _extra_skills_line(), 10: _extra_skills_line()}.get(jid, "")
             out = MaterialsOutput(
                 resume_needs_update=True, skills_section=skills, projects_section=projects,
                 cover_letter="I built Budget Bot — fast.",
             )
         elif response_model is ResumeSectionsOutput:
             # job 4 fixes it by reverting to the base block; job 5 stays bloated;
-            # 8 keeps its long Skills line (the real-world failure); 9 overflows
-            # in both blocks, so no single-block variant fits either.
-            if jid == 8:
-                out = ResumeSectionsOutput(skills_section=_bloated_skills(), projects_section=_tailored_projects())
+            # 10 keeps its extra Skills line; 9 overflows in both blocks, so no
+            # single-block variant fits either.
+            if jid == 10:
+                out = ResumeSectionsOutput(skills_section=_extra_skills_line(), projects_section=_tailored_projects())
             elif jid == 9:
-                out = ResumeSectionsOutput(skills_section=_bloated_skills(), projects_section=_bloated_projects())
+                out = ResumeSectionsOutput(skills_section=_extra_skills_line(), projects_section=_bloated_projects())
             else:
                 out = ResumeSectionsOutput(projects_section="" if jid == 4 else _bloated_projects())
         else:
             raise AssertionError(response_model)
         with lock:
-            calls.append((response_model.__name__, jid, start, time.monotonic(), system_instruction))
+            calls.append((response_model.__name__, jid, start, time.monotonic(), system_instruction, user_text))
         return out
 
     preflight_seen = []
@@ -451,7 +513,8 @@ def test_runner(real_pdf: bool):
     os.environ.pop("JOBO_LLM_BACKEND", None)
     try:
         for jid, company in ((1, "GoodCo"), (2, "PoorFitCo"), (3, "DeadCo"), (4, "LongCo"), (5, "LongerCo"),
-                            (6, "ExtraProjectCo"), (8, "LongSkillsCo"), (9, "BothLongCo")):
+                            (6, "ExtraProjectCo"), (8, "LongSkillsCo"), (9, "BothLongCo"),
+                            (10, "ExtraSkillsCo")):
             new_job(session, jid, company)
         new_job(session, 7, "InternCo", " Intern")
         result = runner.run_module3(session)
@@ -465,7 +528,7 @@ def test_runner(real_pdf: bool):
 
     try:
         fits = [c for c in calls if c[0] == "FitDecisionOutput"]
-        check("9 fit calls", len(fits) == 9, str(len(fits)))
+        check("10 fit calls", len(fits) == 10, str(len(fits)))
         first_end = min(fits, key=lambda c: c[2])[3]
         others_start = sorted(c[2] for c in fits)[1:]
         check("first fit call finished before the others started",
@@ -477,9 +540,9 @@ def test_runner(real_pdf: bool):
         check("job text is not in the shared system prompt",
               not re.search(r"Backend Engineer \d", fits[0][4]) and "job_id:" not in fits[0][4])
 
-        check("result counters", (result.phase1_run, result.phase2_run, result.phase2_closed, result.failed) == (9, 6, 1, 0),
+        check("result counters", (result.phase1_run, result.phase2_run, result.phase2_closed, result.failed) == (10, 7, 1, 0),
               str((result.phase1_run, result.phase2_run, result.phase2_closed, result.failed, result.errors)))
-        check("preflight only for jobs heading to materials", sorted(preflight_seen) == [1, 3, 4, 5, 6, 8, 9],
+        check("preflight only for jobs heading to materials", sorted(preflight_seen) == [1, 3, 4, 5, 6, 8, 9, 10],
               str(sorted(preflight_seen)))
 
         by = lambda name, jid: [c for c in calls if c[0] == name and c[1] == jid]
@@ -524,18 +587,31 @@ def test_runner(real_pdf: bool):
         if real_pdf:
             check("trimmed PDF really is one page",
                   pdf.count_pdf_pages(Path(rows[6].module3_resume_pdf_path)) == 1)
-        check("long-skills job: one retry, then a variant instead of the default",
-              len(by("ResumeSectionsOutput", 8)) == 1
+        # GHO-104: an over-long Skills line is trimmed in code on the first
+        # try instead of costing a second model call.
+        base_skills = resume_splice.editable_blocks(BASE_TEX)["Programming Skills"]
+        check("long-skills job: trimmed in code, no model retry",
+              not by("ResumeSectionsOutput", 8)
               and rows[8].module3_resume_pdf_path.endswith("/8/resume.pdf"))
         tex8 = (Path(art.name) / "8" / "resume.tex").read_text()
-        base_skills = resume_splice.editable_blocks(BASE_TEX)["Programming Skills"]
-        check("variant keeps tailored projects with the base skills",
+        check("trim dropped the last Skills entries and kept the tailored projects",
               "Built a low-latency" in tex8 and base_skills in tex8 and FakePdf.BLOAT not in tex8)
         man8 = json.loads((Path(art.name) / "8" / "manifest.json").read_text())
-        check("variant recorded as tailored", man8["resume_tailored"] is True)
+        check("trimmed resume recorded as tailored", man8["resume_tailored"] is True)
+        check("extra-skills-line job: one retry, then a variant instead of the default",
+              len(by("ResumeSectionsOutput", 10)) == 1
+              and rows[10].module3_resume_pdf_path.endswith("/10/resume.pdf"))
+        check("retry names the lines over budget",
+              "Skills has 3 lines; the page holds 2." in by("ResumeSectionsOutput", 10)[0][5],
+              by("ResumeSectionsOutput", 10)[0][5][-400:])
+        tex10 = (Path(art.name) / "10" / "resume.tex").read_text()
+        check("variant keeps tailored projects with the base skills",
+              "Built a low-latency" in tex10 and base_skills in tex10 and FakePdf.BLOAT not in tex10)
+        man10 = json.loads((Path(art.name) / "10" / "manifest.json").read_text())
+        check("variant recorded as tailored", man10["resume_tailored"] is True)
         check("both blocks too long: still falls back to the default",
               rows[9].module3_resume_pdf_path == str(DEFAULT_PDF_PATH.resolve()))
-        check("cover PDFs written", all(Path(rows[j].module3_cover_pdf_path).is_file() for j in (1, 4, 5, 6, 8, 9)))
+        check("cover PDFs written", all(Path(rows[j].module3_cover_pdf_path).is_file() for j in (1, 4, 5, 6, 8, 9, 10)))
     finally:
         session.close()
         os.unlink(db_path)
@@ -612,6 +688,7 @@ def main(real_pdf: bool = False) -> int:
     the file directly also compiles real LaTeX (needs latexmk, pdfinfo, pandoc)."""
     print("module 3 triage regressions")
     test_splice()
+    test_line_budget()
     test_fit_profile()
     test_claude_parse()
     test_claude_subprocess()

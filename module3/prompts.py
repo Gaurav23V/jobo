@@ -186,10 +186,21 @@ def materials_system(*, introduction_markdown: str, base_resume_latex: str) -> s
 The base résumé's page is already full with its {n} projects. Each extra project adds 3-4 lines and pushes the last section onto a second page, which shortening words cannot win back.
 - **projects_section must contain exactly {n} project entries** (`\\\\resumeSubItem`), never more, even when more highlighted project excerpts are provided.
 - Choose the {n} projects most relevant to this job (from the excerpts or the base), and list the **most relevant first**.""" if n else ""
+    # GHO-104: a third of first tries still overflowed, nearly always by one
+    # wrapped line, because the page has less than a line spare. Give the
+    # model the limits as numbers measured from the base.
+    budget = resume_splice.line_budget(base_resume_latex)
+    line_budget = f"""
+
+## Line budget (hard limit)
+
+The base résumé's page has less than one printed line spare. A Skills line or project bullet that prints one line longer than in the base pushes the résumé onto a second page. Count printed characters (what the PDF shows, not LaTeX markup):
+- **skills_section: at most {budget.skills_lines} lines (`\\item`), each at most {budget.skills_chars} characters** including its bold label. To add a skill to a line, drop a less relevant one from it. Put the most relevant entries first on each line.
+- **projects_section: at most {budget.bullets} bullets in total, each at most {budget.bullet_chars} characters.** Shorter is fine.""" if budget else ""
     from policy import personal
 
     materials = MATERIALS_SYSTEM.replace("{first_name}", personal.first_name())
-    return f"""{materials}{project_cap}
+    return f"""{materials}{project_cap}{line_budget}
 
 ## Candidate introduction (use for cover letter voice and personalization; stay concise)
 

@@ -176,10 +176,10 @@ def _verify_resume(*, base_tex: str, skills: str, projects: str, art_dir: Path):
     return pdf_path, latex, problems, overflowed
 
 
-def _verify_with_project_cap(
+def _verify_with_trims(
     *, base_tex: str, skills: str, projects: str, art_dir: Path, job_id: int
 ):
-    """_verify_resume, plus a no-LLM fix for the commonest overflow.
+    """_verify_resume, plus no-LLM fixes for the two commonest overflows.
 
     The base resume fills its page with exactly its own number of projects.
     In the 2026-09-29 run, 13 of 15 tailored resumes with one extra project
@@ -188,30 +188,53 @@ def _verify_with_project_cap(
     overflows AND carries more projects than the base, drop the trailing
     (least relevant) entries and check again before spending a model retry.
 
-    Returns (pdf_path, latex, problems, projects_used).
+    The page also has less than one printed line spare, so a Skills line
+    that grows past the longest base line wraps and spills the page (on
+    2026-10-30, 58 of 104 tailored resumes overflowed on the first try).
+    When the candidate still overflows, drop entries from the end of each
+    over-long Skills line and check again. If the page is still over, the
+    problem names the lines over budget so the model's retry fixes those.
+
+    Returns (pdf_path, latex, problems, skills_used, projects_used).
     """
     pdf_path, latex, problems, overflowed = _verify_resume(
         base_tex=base_tex, skills=skills, projects=projects, art_dir=art_dir
     )
+    if not overflowed:
+        return pdf_path, latex, problems, skills, projects
     cap = resume_splice.count_projects(
         resume_splice.editable_blocks(base_tex)[resume_splice.PROJECTS_SECTION]
     )
     have = resume_splice.count_projects(projects)
-    if not overflowed or not cap or have <= cap:
-        return pdf_path, latex, problems, projects
-    try:
-        trimmed = resume_splice.trim_projects(projects, cap)
-    except ValueError as e:
-        logger.warning("job_id=%s: could not trim projects: %s", job_id, e)
-        return pdf_path, latex, problems, projects
-    logger.info(
-        "job_id=%s: resume ran past one page with %d projects; keeping the first %d.",
-        job_id, have, cap,
-    )
-    pdf2, latex2, problems2, _ = _verify_resume(
-        base_tex=base_tex, skills=skills, projects=trimmed, art_dir=art_dir
-    )
-    return pdf2, latex2, problems2, trimmed
+    if cap and have > cap:
+        try:
+            trimmed = resume_splice.trim_projects(projects, cap)
+        except ValueError as e:
+            logger.warning("job_id=%s: could not trim projects: %s", job_id, e)
+        else:
+            logger.info(
+                "job_id=%s: resume ran past one page with %d projects; keeping the first %d.",
+                job_id, have, cap,
+            )
+            projects = trimmed
+            pdf_path, latex, problems, overflowed = _verify_resume(
+                base_tex=base_tex, skills=skills, projects=projects, art_dir=art_dir
+            )
+    budget = resume_splice.line_budget(base_tex)
+    if overflowed and budget and skills.strip():
+        trimmed = resume_splice.trim_skills(skills, budget.skills_chars)
+        if trimmed != skills:
+            logger.info(
+                "job_id=%s: resume ran past one page; trimmed Skills lines to %d characters.",
+                job_id, budget.skills_chars,
+            )
+            skills = trimmed
+            pdf_path, latex, problems, overflowed = _verify_resume(
+                base_tex=base_tex, skills=skills, projects=projects, art_dir=art_dir
+            )
+    if overflowed and budget:
+        problems += resume_splice.over_budget(skills, projects, budget)
+    return pdf_path, latex, problems, skills, projects
 
 
 def _one_page_variant(
@@ -242,7 +265,7 @@ def _one_page_variant(
         # Only one block was tailored, so dropping it means the default resume.
         return None
     for name, sk, pr in variants:
-        pdf_path, latex, problems, _ = _verify_with_project_cap(
+        pdf_path, latex, problems, _, _ = _verify_with_trims(
             base_tex=base_tex, skills=sk, projects=pr, art_dir=art_dir, job_id=job_id,
         )
         if not problems and pdf_path is not None:
@@ -274,7 +297,7 @@ def _compile_verified_resume(
     latex = ""
     last_problem = ""
     for attempt in range(1, MAX_MATERIALS_ATTEMPTS + 1):
-        pdf_path, latex, problems, projects = _verify_with_project_cap(
+        pdf_path, latex, problems, skills, projects = _verify_with_trims(
             base_tex=base_tex, skills=skills, projects=projects, art_dir=art_dir,
             job_id=job_id,
         )
