@@ -220,6 +220,21 @@ PROGRESS_EXTENSION_SEC = 360
 PROGRESS_MIN_NEW_FIELDS = 3
 PROGRESS_WINDOW_STEPS = 20
 PROGRESS_LOW_WATER = 10
+# A long form gets room for its length, once, when a field listing first
+# shows LONG_FORM_CONTROLS or more. Liberty 3048 (Paylocity, 91 controls) ran out
+# at 80/80 and again at 50/50 on its retry, and Consolidated 2802 (LinkedIn, 209
+# controls) at 80/80, both mid-form (2026-10-30, GHO-107). A retry is lifted
+# to the first-try budget first: the 50-step retry budget was set for forms
+# that failed on something other than their length.
+LONG_FORM_CONTROLS = 40
+LONG_FORM_STEPS = 30
+LONG_FORM_SEC = 360
+# A paged listing names the page's total ("#1-#60 of 91 controls"); a short
+# one only counts what it lists, which is all of them.
+_PAGED_TOTAL_RE = re.compile(r"\bof (\d+) controls\b")
+_LISTED_COUNT_RE = re.compile(r"^FIELDS_LISTED: (\d+)\b", re.MULTILINE)
+# `NEED_FIELDS #61` lists the page of controls from #61 on.
+_LIST_START_RE = re.compile(r"#\s*(\d+)")
 _FIELD_SET_LABEL_RE = re.compile(r"^FIELD_SET: (.+?) = ", re.MULTILINE)
 # Clicking is cheap, but a runaway loop of Submit clicks risks duplicate
 # applications, so keep this tight.
@@ -1437,23 +1452,31 @@ def _resolve_password_reset(line: str, *, job_id: int) -> str:
     )
 
 
-def _resolve_fields_listing(*, cdp_url: str, job_id: int) -> str:
+def _listed_total(listing: str) -> int:
+    """Controls on the page, from a listing reply (0 if it is not one)."""
+    m = _PAGED_TOTAL_RE.search(listing or "") or _LISTED_COUNT_RE.search(listing or "")
+    return int(m.group(1)) if m else 0
+
+
+def _resolve_fields_listing(*, cdp_url: str, job_id: int, start: int = 1) -> str:
     """Enumerate the page's controls and number them for the agent."""
     try:
         from module4 import form_filler
     except Exception as e:  # pragma: no cover - import guard
         return f"FIELDS_LISTED_FAILED: form filler unavailable ({e})."
 
-    logger.info("[%s] Agent requested the numbered field list.", job_id)
+    logger.info("[%s] Agent requested the numbered field list%s.", job_id,
+                f" from #{start}" if start > 1 else "")
     promoted = _promote_embedded_form(cdp_url, job_id)
     try:
-        result = form_filler.list_fields(cdp_url)
+        result = form_filler.list_fields(cdp_url, start=start)
     except Exception as e:
         logger.warning("[%s] list_fields raised: %s", job_id, e)
         return promoted + f"FIELDS_LISTED_FAILED: {e}"
     if result.ok:
         form_filler.remember_listing(cdp_url, result)
-        logger.info("[%s] Listed %d field(s) for the agent.", job_id, len(result.fields))
+        logger.info("[%s] Listed %d field(s) for the agent (%d on the page).",
+                    job_id, len(result.fields), result.total)
     else:
         logger.warning("[%s] Field listing failed: %s", job_id, result.note[:100])
     return promoted + result.as_agent_message()
@@ -1618,6 +1641,8 @@ def _run_apply_agent(
 
     account_extra = 0
     progress_extra = 0
+    long_form_extra = 0
+    started = time.monotonic()
     # Step count at which each field was first set by the pipeline.
     fields_set_at: dict[str, int] = {}
 
@@ -1636,6 +1661,29 @@ def _run_apply_agent(
         return (
             f"\n\n[jobo] Account setup does not count against the form: {ACCOUNT_SETUP_STEPS} "
             f"model steps were added, so this job's step budget is now {budget}."
+        )
+
+    def long_form_note(listing: str) -> str:
+        # The first listing of a long form grows the budget once and tells the
+        # agent to fill it by number. A retry is first lifted to the first-try
+        # budget (no lift when JOBO_APPLY_MAX_TURNS pins it).
+        nonlocal budget, deadline, long_form_extra
+        total = _listed_total(listing)
+        if long_form_extra or total < LONG_FORM_CONTROLS:
+            return ""
+        lift = max(0, step_budget(is_retry=False, budget_boost=False) - base_budget)
+        long_form_extra = LONG_FORM_STEPS + lift
+        budget += long_form_extra
+        deadline = max(deadline, started + AGENT_TIMEOUT_FIRST_SEC) + LONG_FORM_SEC
+        logger.info(
+            "[%s] Long form (%d controls): +%d steps (budget now %d).",
+            job_id, total, long_form_extra, budget,
+        )
+        return (
+            f"\n\n[jobo] This form has {total} controls, so {long_form_extra} model steps "
+            f"were added once: this job's step budget is now {budget}. Every control you "
+            "type into or click yourself costs a step. Set them by number instead, text "
+            "boxes too: one `NEED_FIELD:` line each, every one you can answer in ONE turn."
         )
 
     def progress_note(steps_used: int) -> str:
@@ -1686,6 +1734,7 @@ def _run_apply_agent(
                     f"ran out of step budget ({base_budget} model steps) mid-form, before submitting"
                     + (f" (plus {account_extra} for account setup)" if account_extra else "")
                     + (f" (plus {progress_extra} while still progressing)" if progress_extra else "")
+                    + (f" (plus {long_form_extra} for a long form)" if long_form_extra else "")
                 ),
             )
         remaining = int(deadline - time.monotonic())
@@ -1838,6 +1887,7 @@ def _run_apply_agent(
                 # spending a turn (and a list round) asking for them.
                 auto_relists += 1
                 listing = _resolve_fields_listing(cdp_url=cdp_url, job_id=job_id)
+                listing += long_form_note(listing)
                 replies.append(
                     "The form changed while these fields were being set, so it was "
                     "re-listed for you below. Use ONLY these new numbers from now on "
@@ -1865,7 +1915,10 @@ def _run_apply_agent(
                 field_list_rounds += 1
                 continue
             field_list_rounds += 1
-            prompt = _resolve_fields_listing(cdp_url=cdp_url, job_id=job_id)
+            start = _LIST_START_RE.search(list_req.group(0))
+            prompt = _resolve_fields_listing(
+                cdp_url=cdp_url, job_id=job_id, start=int(start.group(1)) if start else 1)
+            prompt += long_form_note(prompt)
             continue
 
         # Before NEED_CLICK: an agent that asks for both wants the captcha

@@ -182,6 +182,18 @@ _COLLECT_JS = r"""
           label = t.replace(/\s+/g, ' ').slice(0, 90) + '...';
       }
     }
+    // LinkedIn's Easy Apply checkbox lists wrap each box in its own div, with
+    // the option text in a sibling div: <div><div><input id=_r_g1_></div>
+    // <div><p>Indian</p></div></div>. Consolidated 2802 (2026-10-30) listed 60 such
+    // boxes as "_r_g1_".."_r_jh_" and spent 30 console calls finding "Indian".
+    // Climb while the ancestor still holds only this one box.
+    if (!label && ['checkbox', 'radio'].includes(type)) {
+      for (let p = el.parentElement, h = 0; p && h < 3 && !label; p = p.parentElement, h++) {
+        if (p.querySelectorAll('input[type=checkbox], input[type=radio]').length > 1) break;
+        const t = (p.innerText || '').trim();
+        if (t && t.length < 120) label = t;
+      }
+    }
     label = (label || '').replace(/\s+/g, ' ').trim();
     // A dropdown's accessible name often ends with its CURRENT value (Angular
     // mat-select: "UG Qualification B.Tech/B.E."; Workday button aria-label:
@@ -238,8 +250,14 @@ _COLLECT_JS = r"""
 """
 
 # Enumerate the page's controls so the agent can address one by NUMBER.
+# One listing shows at most LIST_PAGE controls; `NEED_FIELDS #61` lists the
+# next page. Both 60-field failures on 2026-10-30 were this cap, not the form:
+# Liberty 3048 (Paylocity) had 91 controls and Consolidated 2802 (LinkedIn) 209, and
+# neither agent could see the questions past #60, so they typed or ran
+# console scripts at them one step each until the budget ran out (GHO-107).
+LIST_PAGE = 60
 _LIST_FIELDS_JS = r"""
-(function() {
+(function(start) {
 __COLLECT__
   const describe = (c) => {
     const el = c.el;
@@ -316,9 +334,10 @@ __COLLECT__
             required: !!(el.required || el.getAttribute('aria-required') === 'true' ||
               el.closest('[aria-required=true]') || /\*\s*$/.test(c.label))};
   };
-  return JSON.stringify({fields: controls.slice(0, 60).map(describe), total: controls.length});
-})()
-""".replace("__COLLECT__", _COLLECT_JS)
+  return JSON.stringify({fields: controls.slice(start, start + __PAGE__).map(describe),
+                         total: controls.length});
+})
+""".replace("__COLLECT__", _COLLECT_JS).replace("__PAGE__", str(LIST_PAGE))
 
 # The JS below runs in the page. It is deliberately one self-contained
 # function so the whole operation is a single CDP round-trip: find the field,
@@ -1255,7 +1274,7 @@ class ListFieldsResult:
     ok: bool
     fields: list[FieldInfo] = field(default_factory=list)
     note: str = ""
-    # Controls on the page, including any beyond the 60 that are listed.
+    # Controls on the page, including any beyond the LIST_PAGE that are listed.
     total: int = 0
     # What the site itself flags (Workday's "Errors Found" list), GHO-72.
     site_errors: list[str] = field(default_factory=list)
@@ -1270,9 +1289,16 @@ class ListFieldsResult:
         lets it click Continue instead of auditing prefilled sections.
         """
         empty = [f for f in self.fields if f.missing_required()]
-        more = self.total - len(self.fields)
-        tail = (f" Only the first {len(self.fields)} of {self.total} controls are "
-                "listed; check the rest of the page too.") if more > 0 else ""
+        first = self.fields[0].index if self.fields else 1
+        last = first + len(self.fields) - 1
+        tail = ""
+        if first == 1 and last < self.total:
+            tail = f" Only the first {len(self.fields)} of {self.total} controls are listed."
+        elif first > 1:
+            tail = f" This list shows #{first}-#{last} of {self.total} controls."
+        if last < self.total:
+            tail += (f" Print `NEED_FIELDS #{last + 1}` for the next ones; numbers "
+                     "stay the same across pages.")
         if self.site_errors:
             # The site's verdict beats our reading of the DOM: this is the
             # answer to "which field is still invalid".
@@ -1282,6 +1308,10 @@ class ListFieldsResult:
             names = ", ".join(f"#{f.index} {f.label or f.meta or '(unlabelled)'}" for f in empty)
             return (f"Required and still EMPTY: {names}. Fill these. Leave fields that "
                     "already have a value alone unless they contradict a candidate fact." + tail)
+        if last < self.total:
+            return ("Every required field listed above already has a value. Prefilled "
+                    "history entries (Work History, Education) stay as they are: do not "
+                    "rewrite them. List the rest before clicking Continue / Next." + tail)
         return ("Every required field listed above already has a value. Prefilled "
                 "history entries (Work History, Education) stay as they are: do not "
                 "rewrite them, click Continue / Next." + tail)
@@ -1494,13 +1524,14 @@ def _ensure_browser(cdp_url: str) -> tuple[bool, str]:
     return True, "browser was restarted"
 
 
-def list_fields(cdp_url: str) -> ListFieldsResult:
+def list_fields(cdp_url: str, start: int = 1) -> ListFieldsResult:
     """Enumerate the active page's form controls, numbered for the agent.
 
     This is the mechanism that removes prose matching entirely: the agent picks
     a NUMBER off this list instead of describing a field in words that then
-    have to be interpreted.
+    have to be interpreted. `start` is the first number listed (paging).
     """
+    offset = max(0, int(start) - 1)
     alive, note = _ensure_browser(cdp_url)
     if not alive:
         return ListFieldsResult(ok=False, note=note)
@@ -1512,7 +1543,8 @@ def list_fields(cdp_url: str) -> ListFieldsResult:
             cdp.call("Runtime.enable")
             r = cdp.call(
                 "Runtime.evaluate",
-                {"expression": _LIST_FIELDS_JS, "returnByValue": True, "awaitPromise": False},
+                {"expression": f"({_LIST_FIELDS_JS})({offset})", "returnByValue": True,
+                 "awaitPromise": False},
             )
             raw = r.get("result", {}).get("result", {}).get("value")
             if not raw:
@@ -1525,7 +1557,7 @@ def list_fields(cdp_url: str) -> ListFieldsResult:
 
     fields = [
         FieldInfo(
-            index=i + 1,
+            index=offset + i + 1,
             label=f.get("label") or "",
             meta=f.get("meta") or "",
             kind=f.get("kind") or "",
@@ -1570,8 +1602,20 @@ _LAST_KINDS: dict[str, list[tuple[str, str]]] = {}
 
 
 def remember_listing(cdp_url: str, result: ListFieldsResult) -> None:
-    _LAST_LISTING[cdp_url] = [f.sig for f in result.fields]
-    _LAST_KINDS[cdp_url] = [(f.kind, f.label or f.meta) for f in result.fields]
+    # A later page adds its numbers to the ones already shown; a listing from
+    # #1 starts over. A number from an older page is still checked against the
+    # signature it was shown with, so a form that changed meanwhile is refused.
+    first = result.fields[0].index if result.fields else 1
+    sigs = _LAST_LISTING.get(cdp_url, []) if first > 1 else []
+    kinds = _LAST_KINDS.get(cdp_url, []) if first > 1 else []
+    for f in result.fields:
+        while len(sigs) < f.index:
+            sigs.append("")
+            kinds.append(None)
+        sigs[f.index - 1] = f.sig
+        kinds[f.index - 1] = (f.kind, f.label or f.meta)
+    _LAST_LISTING[cdp_url] = sigs
+    _LAST_KINDS[cdp_url] = kinds
 
 
 def listed_field(cdp_url: str, index: Optional[int]) -> Optional[tuple[str, str]]:

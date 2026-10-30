@@ -318,8 +318,12 @@ then set every dropdown in ONE turn, one `NEED_FIELD:` line each.
 Rules: one field per directive line; put ALL the fields you can already set
 from one listing in the SAME turn, one `NEED_FIELD:` line each (they run in
 order and you get one reply per line); no STATUS line in the same turn; after
-FIELD_SET do not re-type or re-click that field. This is for stubborn widgets -
-ordinary text boxes are faster to type yourself.
+FIELD_SET do not re-type or re-click that field. On a short form this is for
+stubborn widgets - ordinary text boxes are faster to type yourself. On a long
+form (40+ controls listed) set the text boxes by number too, in the same turn:
+each one typed by hand costs a model step. A listing shows 60 controls at a
+time; when it says there are more, print `NEED_FIELDS #61` (the number it gives)
+for the next ones rather than reading the rest of the page by hand.
 
 **Never describe a field in prose when you can use its number.** A description
 like `NEED_FIELD: College Name (the combobox, NOT the Full name input) =
