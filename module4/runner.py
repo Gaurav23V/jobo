@@ -28,6 +28,7 @@ from db.models import JobModel
 from module4 import (
     address_wall,
     agent_driver,
+    application_caps,
     blockers,
     browser_session,
     budget_guard,
@@ -292,7 +293,9 @@ class Module4Result:
     # Dropped without another attempt: the failure is one a retry cannot fix
     # (module4/blockers.py). Also counted in `dropped`.
     permanent_blocked: int = 0
-    # Parked on a temporarily paused ATS (policy/paused_sites.py); no attempt charged.
+    # Parked on a temporarily paused ATS (policy/paused_sites.py), or on a host
+    # whose application cap is cooling down (module4/application_caps.py); no
+    # attempt charged.
     paused: int = 0
     # Google Form behind Google sign-in: kept in the queue, no attempt
     # charged, skipped without an agent until the browser is signed in.
@@ -697,6 +700,22 @@ def _drop_identity_wall(session, job, host: str, result: "Module4Result", *, dry
     logger.info("[%s] Dropped without an agent: %s (%s).", job.id, perm, host)
 
 
+def _running_caps(session) -> dict:
+    """Application-cap cool-downs still running (module4/application_caps.py)."""
+    return application_caps.active_caps(
+        session.query(JobModel).filter(JobModel.module4_last_status.like(f"{application_caps.STATUS_PREFIX}%"))
+    )
+
+
+def _park_for_cap(session, job, host: str, until, detail: str, result: "Module4Result", *, dry_run: bool) -> None:
+    """Park a job on a host whose application cap is cooling down; charge nothing."""
+    persist.mark_status(session, job, application_caps.status_for(host, until, detail), dry_run=dry_run)
+    result.paused += 1
+    result.details.append(f"job_id={job.id}: PAUSED, application cap on {host} until {until:%Y-%m-%d %H:%M} UTC")
+    logger.info("[%s] Parked (no attempt charged): %s application cap, cooling down until %s UTC.",
+                job.id, host, f"{until:%Y-%m-%d %H:%M}")
+
+
 def run_module4(
     session: Session,
     *,
@@ -1032,6 +1051,16 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
             _drop_identity_wall(session, job, id_wall, result, dry_run=dry_run)
             continue
 
+        # A form on a host whose application cap refused another job is
+        # cooling down (GHO-110: amazon.jobs); wait it out without an agent.
+        capped = application_caps.capped_host_for_url(
+            (worker.apply_url if worker is not None else None) or job.job_url, _running_caps(session)
+        ) if not force else None
+        if capped:
+            _park_for_cap(session, job, capped[0], capped[1],
+                          application_caps.pre_park_detail(*capped), result, dry_run=dry_run)
+            continue
+
         counts_before_job = _counters(result)
         result.attempted += 1
 
@@ -1138,6 +1167,11 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 id_wall := identity_walls.identity_wall_for_url(route.apply_url)
             ):
                 _drop_identity_wall(session, job, id_wall, result, dry_run=dry_run)
+            elif route.kind == linkedin_router.EXTERNAL and not force and (
+                capped := application_caps.capped_host_for_url(route.apply_url, _running_caps(session))
+            ):
+                _park_for_cap(session, job, capped[0], capped[1],
+                              application_caps.pre_park_detail(*capped), result, dry_run=dry_run)
             elif route.kind == linkedin_router.EXTERNAL and google_forms.find_form_url(route.apply_url) is None:
                 worker.hand_off(jid, "form", route.apply_url, f"external: {route.reason}")
                 result.routed_form += 1
@@ -1168,7 +1202,10 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
         previous_failure = None
         budget_boost = False
         last_was_sign_out = linkedin_session.is_signed_out_detail(job.module4_last_status)
-        if is_retry and job.module4_last_status and not last_was_sign_out:
+        # A finished cap cool-down is no failure of this form, and quoting the
+        # refusal would talk the agent out of trying (GHO-110).
+        last_was_cap = application_caps.parked_until(job.module4_last_status) is not None
+        if is_retry and job.module4_last_status and not last_was_sign_out and not last_was_cap:
             # Strip the leading "stuck:"/"captcha_failed:" status prefix, keep
             # just the reason text, so the retry prompt can steer around it.
             previous_failure = job.module4_last_status.split(":", 1)[-1].strip() or None
@@ -1451,10 +1488,18 @@ def _apply_loop(session, jobs, result, left, *, dry_run, force, budget_check, wo
                 result.already_applied += 1
                 logger.info("[%s] ALREADY APPLIED per the platform.", jid)
             result.details.append(f"job_id={jid}: {outcome.status} ({outcome.detail})")
-        elif blockers.dead_listing_reason(outcome.status, outcome.detail, job.job_url):
+        elif cap_host := application_caps.cap_host(outcome.detail, pace_url):
+            # The site refused: this candidate has sent it as many
+            # applications as it takes for now (GHO-110: amazon.jobs). Not the
+            # job's fault and not hopeless: park the host, charge nothing.
+            _park_for_cap(session, job, cap_host, application_caps.cooldown_end(cap_host),
+                          outcome.detail, result, dry_run=dry_run)
+        elif blockers.dead_listing_reason(outcome.status, outcome.detail, job.job_url,
+                                          previous=job.module4_last_status):
             # Stuck on a listing the job board no longer serves: closed, like
             # a dead posting the agent recognised itself.
-            gone = blockers.dead_listing_reason(outcome.status, outcome.detail, job.job_url)
+            gone = blockers.dead_listing_reason(outcome.status, outcome.detail, job.job_url,
+                                                previous=job.module4_last_status)
             persist.mark_closed(session, job, status="closed", detail=f"{gone}: {outcome.detail}",
                                 dry_run=dry_run)
             result.closed += 1

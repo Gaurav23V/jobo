@@ -93,6 +93,7 @@ SUITES = (
     'test_oracle_cx_select',
     'test_profile_resume_site',
     'test_otp_taleo_symbol_code',
+    'test_application_caps',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',

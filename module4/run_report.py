@@ -68,6 +68,10 @@ SIGNATURE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = tuple(
         ("browser:crash", "temporary",
          r"browser (?:session )?(?:crash|died|closed unexpectedly|disconnected)|(?:page|session|tab) crashed|target closed"
          r"|aw snap|cdp (?:connection|session) (?:lost|closed)"),
+        # The site's own cap on applications per candidate, parked until it
+        # cools down (module4/application_caps.py). Nothing to fix in code.
+        ("site:application_cap", "temporary",
+         r"\bapp_cap\b|maximum number of (?:job )?applications|application[_ ]limit"),
         ("site:rate_limited", "temporary", r"too many (?:attempts|requests)|rate[- ]?limit"),
         # Parked behind a captcha wall the agent never passes (module4/captcha_walls.py):
         # nothing left to fix in code; going further is G's call (a solver service).

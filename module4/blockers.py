@@ -218,6 +218,29 @@ _PAGE_NOT_SEEN = re.compile(
     re.I,
 )
 
+# The employer's own server cannot be reached (job 2451: the employer's job page
+# printed "Failed to connect to <backend> port 443" on 25 Oct and again on
+# 30 Oct; still so the same night). One run's failure is a temporary outage
+# and gets its retry; the same host unreachable again on the next run is a
+# dead site, closed like a dead listing. Our own browser or network failing
+# (CDP on 127.0.0.1, LinkedIn itself unreachable) is never this.
+_UNREACHABLE = re.compile(
+    r"failed to connect to|could not connect to (?:the )?server|"
+    r"err_(?:connection_(?:refused|timed_out|reset|closed)|name_not_resolved|address_unreachable)|"
+    r"dns_probe_\w+|site can'?t be reached|connection (?:refused|timed out)",
+    re.I,
+)
+_OUR_SIDE = re.compile(r"127\.0\.0\.1|localhost|\bcdp\b|browser session|linkedin\.com", re.I)
+_HOST_NAME = re.compile(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", re.I)
+
+
+def _unreachable_hosts(detail: str) -> set[str]:
+    """Hosts named in a report of an employer site that cannot be reached."""
+    if not _UNREACHABLE.search(detail) or _OUR_SIDE.search(detail):
+        return set()
+    return {h.lower().removeprefix("www.") for h in _HOST_NAME.findall(detail)}
+
+
 _NO_WEB_FORM = re.compile(r"mailto:|no web (?:application )?form|apply by email only", re.I)
 _BOT_WALL = re.compile(r"cloudflare|bot[- ]protection|bot[- ]fingerprint", re.I)
 
@@ -272,13 +295,23 @@ def permanent_reason(status: str | None, detail: str | None) -> str | None:
     return None
 
 
-def dead_listing_reason(status: str | None, detail: str | None, url: str | None = None) -> str | None:
-    """A short reason when a stuck attempt really met a listing that is gone."""
+def dead_listing_reason(status: str | None, detail: str | None, url: str | None = None,
+                        *, previous: str | None = None) -> str | None:
+    """A short reason when a stuck attempt really met a listing that is gone.
+
+    previous: the job's stored module4_last_status from its last run, when
+    the attempt being judged is a new one.
+    """
     if (status or "").strip().lower() != "stuck":
         return None
     d = detail or ""
     if _NO_WAY_TO_APPLY.search(d) and not _PAGE_NOT_SEEN.search(d):
         return "job page has no apply form, button or email address"
+    prev_status, _, prev_detail = (previous or "").partition(":")
+    if prev_status.strip().lower() == "stuck" and (
+        _unreachable_hosts(d) & _unreachable_hosts(prev_detail)
+    ):
+        return "employer site unreachable on two runs in a row"
     if not (_ZIPRECRUITER.search(d) or _ZIPRECRUITER.search(url or "")):
         return None
     if _SERVER_ERROR.search(d) and _PERSISTED.search(d):
