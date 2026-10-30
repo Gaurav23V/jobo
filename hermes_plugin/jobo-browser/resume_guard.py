@@ -186,19 +186,22 @@ EXTERNAL_INSPECT_JS = r"""(args) => {
     return '';
   };
   const slots = [];
+  // An open dialog holding the slot: closing it may send the form (GHO-100).
+  const inDialog = el => { for (let n = el; n; n = n.parentElement || (n.getRootNode() || {}).host) {
+    if (n.matches && n.matches('dialog[open], [role=dialog], [role=alertdialog], [aria-modal=true]')) return true; } return false; };
   let oursInInput = false;
   for (const r of roots) {
     for (const i of r.querySelectorAll('input[type=file]')) {
       if (i.disabled) continue;
       const names = [...(i.files || [])].map(f => f.name);
       if (names.some(n => n.toLowerCase() === low)) oursInInput = true;
-      if (kind(i) === 'resume') slots.push({how: 'file input', desc: own(i).slice(0, 80), files: names});
+      if (kind(i) === 'resume') slots.push({how: 'file input', desc: own(i).slice(0, 80), files: names, in_dialog: inDialog(i)});
     }
     for (const b of r.querySelectorAll('button, [role=button], input[type=button], label')) {
       if (!vis(b) || b.disabled) continue;
       const o = own(b);
       if (UPLOADISH.test(o) && !NEVER.test(o) && kind(b) === 'resume')
-        slots.push({how: 'upload button', desc: o.slice(0, 80), files: []});
+        slots.push({how: 'upload button', desc: o.slice(0, 80), files: [], in_dialog: inDialog(b)});
     }
   }
   let text = (document.body && document.body.innerText) || '';
@@ -233,6 +236,12 @@ _EXTERNAL_SUBMIT_NAME = re.compile(r"\b(submit|apply|send|finish)\b", re.I)
 _SCRIPT_SUBMIT = re.compile(r"submit", re.I)
 _EXTERNAL_SCRIPT_SUBMIT = re.compile(r"submit|apply", re.I)
 _SCRIPT_ACTS = re.compile(r"\.click\s*\(|dispatchEvent|requestSubmit|\.submit\s*\(|MouseEvent|PointerEvent", re.I)
+# Controls that close a dialog without using it (see judge_dismiss). The
+# plugin's ref names carry the role first ("button Cancel").
+_ROLE = r"^\s*(?:(?:button|link|menuitem|img|image|generic)\s+)?"
+DISMISS_NAME = re.compile(_ROLE + r"(?:cancel|close|skip|dismiss|not now|(?:maybe )?later|no,? thanks)\b"
+                          r"|" + _ROLE + r"[×✕✖xX]\s*$", re.I)
+_SCRIPT_DISMISS = re.compile(r"cancel|close|skip|dismiss", re.I)
 
 
 def is_linkedin(url: str) -> bool:
@@ -330,6 +339,43 @@ def refusal_message_external(reason: str, expected: str) -> str:
         "(add ` | <attribute>` to pick the slot). Submit once the pipeline replies UPLOAD_DONE. "
         "If the form has no place that takes the file and NEED_UPLOAD keeps failing, do NOT "
         "submit: print STATUS: stuck with DETAIL naming the resume field and the upload error."
+    )
+
+
+def judge_dismiss(states: list[dict], expected: str, guard: dict | None) -> tuple[bool, str]:
+    """(may_dismiss, reason) for Cancel/Close/Skip/Escape on a non-LinkedIn page.
+
+    Duruper (Wren 2909): after two UPLOAD_FAILED the agent pressed "Cancel"
+    on the "Upload Your CV" dialog, and that sent the application with no CV.
+    Refused only while an upload of this job's resume failed, nothing has
+    verified it since, and an open dialog holds a resume field.
+    """
+    g = guard or {}
+    if not expected or int(g.get("resume_uploads_ok") or 0) > 0 or g.get("verified"):
+        return True, "this job's resume is not pending"
+    failed = str(g.get("resume_upload_failed") or "").strip()
+    if not failed:
+        return True, "no upload of this job's resume has failed"
+    if any(st.get("shown_ours") or st.get("ours_in_input") for st in states or []):
+        return True, f"the page shows this job's own file {expected}"
+    for st in states or []:
+        for slot in st.get("slots") or []:
+            if slot.get("in_dialog"):
+                return False, (f"this dialog holds the resume field ({slot.get('how', 'slot')} "
+                               f"{str(slot.get('desc') or '')[:60]!r}) and the upload of this job's resume "
+                               f"failed (last UPLOAD_FAILED: {failed[:160]})")
+    return True, "no open dialog holds a resume field"
+
+
+def refusal_message_dismiss(reason: str, expected: str) -> str:
+    return (
+        f"BLOCKED by jobo: not closing this upload dialog: {reason}. On some sites closing, "
+        "cancelling or skipping the CV step SENDS the application without the file. Do this "
+        "instead: ask again with a hint naming the upload button's own text, e.g.\n"
+        "NEED_UPLOAD: resume | Manual CV Upload\n"
+        f"so the pipeline can attach {expected or 'this job’s resume'}. If the upload still fails, "
+        "do not close, cancel or skip the dialog and do not submit: end with STATUS: stuck and "
+        "DETAIL naming the resume upload dialog and the last UPLOAD_FAILED."
     )
 
 
@@ -532,8 +578,43 @@ def _pressed(state: dict, tool_name: str, point, what: str) -> bool:
     return True
 
 
+def _dismiss_attempt(tool_name: str, args: dict, ref_name) -> str:
+    """What this call dismisses ('' when it is not a Cancel/Close/Skip/Escape)."""
+    if tool_name == "browser_click":
+        name = (ref_name(str(args.get("ref") or "").lstrip("@")) or "") if ref_name else ""
+        return f"click on {name!r}" if DISMISS_NAME.search(name) else ""
+    if tool_name == "browser_press":
+        return "key Escape" if str(args.get("key") or "") in ("Escape", "Esc") else ""
+    if tool_name == "browser_console":
+        expr = str(args.get("expression") or "")
+        return "script" if _SCRIPT_DISMISS.search(expr) and _SCRIPT_ACTS.search(expr) else ""
+    return ""
+
+
+def _check_dismiss(what: str, base: str, expected: str) -> str | None:
+    """Refuse closing a resume upload dialog after this job's upload failed (GHO-100)."""
+    guard = _guard_state()
+    if not str(guard.get("resume_upload_failed") or "").strip():
+        return None  # no failed upload: no page read needed
+    try:
+        states = [s for s in inspect_external(base, None, expected) if s.get("external")]
+    except Exception as e:  # fail open: the driver's NEED_CLICK gate still applies
+        logger.warning("jobo resume guard could not read the form: %s", e)
+        return None
+    ok, reason = judge_dismiss(states, expected, guard)
+    if ok:
+        return None
+    logger.warning("jobo resume guard blocked a dismiss (%s): %s", what, reason)
+    return refusal_message_dismiss(reason, expected)
+
+
 def _check_external(tool_name: str, args: dict, ref_name, base: str, expected: str) -> str | None:
     """The same rule as the driver's NEED_CLICK gate, for every other site (GHO-70)."""
+    dismiss = _dismiss_attempt(tool_name, args, ref_name)
+    if dismiss:
+        refused = _check_dismiss(dismiss, base, expected)
+        if refused:
+            return refused
     gated, point, what = _submit_attempt(tool_name, args, ref_name, _EXTERNAL_SUBMIT_NAME)
     if not gated:
         return None

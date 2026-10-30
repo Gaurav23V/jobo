@@ -275,6 +275,12 @@ class UploadResult:
     # the page settles. A framework still mounting will have replaced it.
     node_id: int = 0
     node_ws: str = ""
+    # The DOM path tied between inputs none of which is rendered: the page's
+    # own upload buttons open them, so `upload_file` lets the hint pick the
+    # button and the file chooser it opens names the input (GHO-100).
+    hidden_tie: bool = False
+    # `candidates` are upload-button labels (the file-chooser path), not inputs.
+    buttons: bool = False
 
     def as_agent_message(self) -> str:
         if self.ok:
@@ -286,13 +292,26 @@ class UploadResult:
                 "uploaded file away. Continue with the remaining form fields and submit."
             )
         lines = [f"UPLOAD_FAILED: {self.detail}"]
-        if self.candidates:
+        if self.candidates and self.buttons:
+            lines.append("Upload buttons that WERE found on the page:")
+            lines.extend(f"  - {c}" for c in self.candidates[:8])
+            lines.append(
+                "Retry with NEED_UPLOAD: <resume|cover> | <words from the right button's own "
+                "text>, e.g. NEED_UPLOAD: resume | Manual CV Upload. Prefer a plain/manual "
+                "upload over an AI or autofill parser."
+            )
+        elif self.candidates:
             lines.append("File inputs that WERE found on the page:")
             lines.extend(f"  - {c}" for c in self.candidates[:8])
             lines.append(
                 "If one of these is the right slot, retry with "
                 "NEED_UPLOAD: <resume|cover> | <a distinguishing attribute value>"
             )
+            if self.hidden_tie:
+                lines.append(
+                    "None of them is shown on the page: a visible upload button opens one. "
+                    "Name that button's own text as the hint."
+                )
         else:
             lines.append(
                 "No file input exists in any open tab. The upload control is "
@@ -991,6 +1010,9 @@ def _is_hidden_copy(t: UploadTarget, targets: list[UploadTarget]) -> bool:
                and o.attrs == t.attrs and o.context.endswith("__rendered__") for o in targets)
 
 
+_AMBIGUOUS = "ambiguous upload slots; supply a distinguishing hint"
+
+
 def _select(targets: list[UploadTarget], filename: str, want: str, hint: str) -> UploadTarget:
     usable = [t for t in targets if t.can_accept(filename) and _purpose_ok(t, want)]
     picked = _selector_pick(usable)
@@ -1027,7 +1049,7 @@ def _select(targets: list[UploadTarget], filename: str, want: str, hint: str) ->
         if len(top) == 1:
             chosen, ties = top[0], top
     if len(ties) != 1:
-        raise RuntimeError("ambiguous upload slots; supply a distinguishing hint")
+        raise RuntimeError(_AMBIGUOUS)
     # Freeze the attributes NEEDED to distinguish the original slot. Unique
     # semantic test IDs may survive changing generated IDs, but shared IDs must
     # never lose their original secondary discriminator as siblings disappear.
@@ -1476,13 +1498,13 @@ def _upload_via_chooser(cdp_url: str, path: Path, want: str, hint: str) -> Uploa
             labels = [c["label"] for c in cands]
             if len(cands) > 1 and cands[0]["score"] == cands[1]["score"]:
                 return UploadResult(False, "several upload buttons match this document kind; "
-                                    "supply a hint naming the right one", candidates=labels)
+                                    "supply a hint naming the right one", candidates=labels, buttons=True)
             pt = json.loads(_checked(cdp, "Runtime.callFunctionOn", {
                 "objectId": doc, "functionDeclaration": _CHOOSER_POINT_JS,
                 "arguments": [{"value": 0}], "returnByValue": True})["result"]["value"])
             if pt.get("err") or not pt.get("ok"):
                 return UploadResult(False, f"upload button {labels[0]!r} is covered or gone "
-                                    f"({pt.get('err') or 'hit ' + pt.get('hit', '?')})", candidates=labels)
+                                    f"({pt.get('err') or 'hit ' + pt.get('hit', '?')})", candidates=labels, buttons=True)
             before = _app_state(cdp, path.name)
             req_mark = set(cdp.requests)
             _checked(cdp, "Page.setInterceptFileChooserDialog", {"enabled": True})
@@ -1512,14 +1534,14 @@ def _upload_via_chooser(cdp_url: str, path: Path, want: str, hint: str) -> Uploa
                 confirmed, rejected = _app_evidence(cdp, before, path.name, req_mark)
                 if rejected:
                     return UploadResult(False, f"the site rejected the file: {'; '.join(rejected[:3])}",
-                                        candidates=labels)
+                                        candidates=labels, buttons=True)
                 if any(c.startswith("page now shows") for c in confirmed) and \
                         not any(c.endswith("(in flight)") for c in confirmed):
                     break
             if not any(c.startswith("page now shows") for c in confirmed):
                 return UploadResult(False, f"clicked {labels[0]!r} and answered its file chooser, but the "
                                     f"page never showed {path.name} ({'; '.join(confirmed[:2]) or 'no site response'})",
-                                    candidates=labels)
+                                    candidates=labels, buttons=True)
             return UploadResult(True, f"{path.name} attached through the file chooser opened by "
                                 f"{labels[0]!r} (site: {'; '.join(confirmed[:3])})",
                                 labels[0], labels, int(node or 0), tab["webSocketDebuggerUrl"])
@@ -1527,8 +1549,9 @@ def _upload_via_chooser(cdp_url: str, path: Path, want: str, hint: str) -> Uploa
 
 
 def upload_file(cdp_url: str, file_path: str, *, want: str = "resume", hint: str = "") -> UploadResult:
-    """DOM file input first; if NO file input exists anywhere, the slot's own
-    upload button with the file chooser intercepted (SuccessFactors shape)."""
+    """DOM file input first; if NO file input exists anywhere, or only hidden
+    twins the DOM cannot tell apart, the slot's own upload button with the
+    file chooser intercepted (SuccessFactors / Duruper shapes)."""
     seen_token = _saw_pages.set(False)
     try:
         result = _upload_dom(cdp_url, file_path, want=want, hint=hint)
@@ -1547,7 +1570,13 @@ def upload_file(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
             shown = None
         if shown is not None:
             return shown
-        if result.candidates:
+        # Inputs exist: never click instead of picking one, EXCEPT when they
+        # tie and none is rendered. Duruper (Wren 2909) has two bare
+        # display:none inputs in its "Upload Your CV" dialog, opened by
+        # "AI CV Upload" and "Manual CV Upload" buttons; nothing on the inputs
+        # tells them apart, but the button the hint names opens exactly one.
+        # The chooser path still refuses a tie between buttons.
+        if result.candidates and not result.hidden_tie:
             return result
         try:
             via = _upload_via_chooser(cdp_url, Path(file_path), w, hint)
@@ -1581,6 +1610,7 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
     token = _deadline.set(time.monotonic() + UPLOAD_BUDGET_SEC)
     inflight_grace: list[bool] = []
     descriptors = []
+    targets: list[UploadTarget] = []
     selected = None
     last = "no <input type=file> found in any open tab"
     consent = ""
@@ -1843,7 +1873,9 @@ def _upload_dom(cdp_url: str, file_path: str, *, want: str = "resume", hint: str
         if reloads:
             pending += (f"; the page posted the form back and reloaded after {reloads} write(s), and the "
                         "reloaded page never showed the file")
-        return UploadResult(False, f"{last}; {exc}{pending}", candidates=descriptors)
+        hidden_tie = (selected is None and str(exc) == _AMBIGUOUS and len(targets) > 1
+                      and not any(t.context.endswith("__rendered__") for t in targets))
+        return UploadResult(False, f"{last}; {exc}{pending}", candidates=descriptors, hidden_tie=hidden_tie)
     finally:
         _deadline.reset(token)
 

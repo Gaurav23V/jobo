@@ -124,6 +124,10 @@ URL given in the task).
       sits (`inside spl-dropzone[data-test=resume-upload] under "Resume"`).
       Copy that bracket or the quoted section name as the hint, e.g.
       NEED_UPLOAD: resume | under "Resume"
+      When the inputs are hidden and the page's own buttons open them (an
+      "Upload Your CV" dialog with "AI CV Upload" and "Manual CV Upload"),
+      name the button by its own text, preferring a plain/manual upload over
+      an AI or autofill parser: NEED_UPLOAD: resume | Manual CV Upload
       Never use positions like "index=1" or "the second one": they match nothing.
    c. The pipeline attaches the file, VERIFIES it actually landed by reading
       the page back, and replies `UPLOAD_DONE: ...`. Your browser session
@@ -181,6 +185,11 @@ URL given in the task).
      do NOT find another way to submit; report STATUS: stuck naming the
      resume field and the last UPLOAD_FAILED. A form with no resume field at
      all submits normally.
+   - After an UPLOAD_FAILED for the resume, never close, cancel, skip or
+     Escape an upload dialog or CV step to get past it: on some sites that
+     SENDS the application without the file (a Cancel on a CV dialog did).
+     Retry NEED_UPLOAD with a better hint; if it still fails, report
+     STATUS: stuck naming the upload dialog and the last UPLOAD_FAILED.
    - Upload requests are capped at 4 per job, so don't loop.
    - Many sites replace the file input with their own "resume.pdf [Remove]"
      chip once they accept a file. That chip IS the attachment; it is not

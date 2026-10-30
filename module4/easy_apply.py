@@ -293,6 +293,20 @@ def submit_gate(cdp_url: str, expected: str, verified: bool) -> tuple[bool, str,
     return True, "no LinkedIn Easy Apply modal is open", False
 
 
+def external_dismiss_gate(cdp_url: str, expected: str, state: dict) -> tuple[bool, str]:
+    """(allowed, reason) before a Cancel/Close/Skip click on a non-LinkedIn
+    page: refused while an open dialog holds a resume field and this job's
+    resume upload failed (GHO-100, see resume_guard.judge_dismiss).
+    An unreadable page passes; the plugin's veto reads it again."""
+    if not str(state.get("resume_upload_failed") or "").strip():
+        return True, "no upload of this job's resume has failed"
+    try:
+        states = [s for s in guard.inspect_external(cdp_url.rstrip("/"), None, expected) if s.get("external")]
+    except Exception as e:
+        return True, f"could not read the page ({e})"
+    return guard.judge_dismiss(states, expected, state)
+
+
 def external_submit_gate(cdp_url: str, expected: str, state: dict) -> tuple[bool, str, bool]:
     """(allowed, reason, page_shows_ours) before a click that may submit a
     non-LinkedIn form. state: the driver's guard state (see resume_guard).

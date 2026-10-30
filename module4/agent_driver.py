@@ -1246,6 +1246,22 @@ def _external_submit_refusal(*, cdp_url: str, job_id: int) -> str:
         "BLOCKED by jobo: ", "", 1) + "\nNo click was sent."
 
 
+def _dismiss_refusal(label: str, *, cdp_url: str, job_id: int) -> str:
+    """Refusal message when this click would close a resume upload dialog
+    after this job's resume upload failed, else '' (GHO-100: Duruper's
+    "Cancel" on its CV dialog sent Wren 2909 with no CV)."""
+    from module4 import easy_apply
+
+    if not _JOB.upload_name or not easy_apply.guard.DISMISS_NAME.search(label or ""):
+        return ""
+    allowed, reason = easy_apply.external_dismiss_gate(cdp_url, _JOB.upload_name, _JOB.guard_state())
+    if allowed:
+        return ""
+    logger.warning("[%s] REFUSED dismiss (resume upload failed): %s", job_id, reason)
+    return "CLICK_FAILED: " + easy_apply.guard.refusal_message_dismiss(reason, _JOB.upload_name).replace(
+        "BLOCKED by jobo: ", "", 1) + "\nNo click was sent."
+
+
 def _resolve_click(line: str, *, cdp_url: str, job_id: int) -> str:
     """Click a button for the agent and report what actually changed."""
     try:
@@ -1258,7 +1274,8 @@ def _resolve_click(line: str, *, cdp_url: str, job_id: int) -> str:
         return "CLICK_FAILED: could not parse that directive. Use NEED_CLICK: <label>"
 
     logger.info("[%s] Agent requested a click: %r", job_id, label or "(submit)")
-    refusal = _easy_apply_submit_refusal(label, cdp_url=cdp_url, job_id=job_id)
+    refusal = (_dismiss_refusal(label, cdp_url=cdp_url, job_id=job_id)
+               or _easy_apply_submit_refusal(label, cdp_url=cdp_url, job_id=job_id))
     if refusal:
         return refusal
     try:
