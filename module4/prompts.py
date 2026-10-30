@@ -24,6 +24,13 @@ _MISSED_MAIL_RE = re.compile(
     r"\b(otp|code|verification|reset)\b.*\b(arriv\w*|not found|never came|not received)",
     re.I,
 )
+# A stored failure where the pipeline's own upload step refused to pick a file
+# input (twin inputs), so the agent hit the NEED_UPLOAD cap.
+_UPLOAD_REFUSED_RE = re.compile(
+    r"ambiguous\b.*\bupload|upload\b.*\b(ambiguous|disambiguat\w*)|disambiguat\w*\b.*\bfile input"
+    r"|upload request cap|exceeded \d+ upload requests",
+    re.I,
+)
 BLOCKLIST_TEXT = employer_blocklist.prompt_text()
 
 # Everything about the candidate comes from the local, gitignored personal/
@@ -751,15 +758,31 @@ your turn with NEED_OTP: <that site>. Report stuck only if a fresh NEED_OTP
 this time also comes back without a code. Never clear cookies or site data to
 get a "fresh session" - that signs the candidate out of LinkedIn for every
 later job."""
+    elif previous_failure and _UPLOAD_REFUSED_RE.search(previous_failure):
+        # Interactive Brokers 2127 (2026-10-25): the uploader could not tell two
+        # identical resume inputs apart. Quoting that next to the generic
+        # notice's "use DOM.setFileInputFiles" would send the retry around the
+        # fixed uploader, so this notice replaces it.
+        retry_note = """
+
+RETRY NOTICE: a previous attempt on this exact job stopped because the
+pipeline's upload step could not tell the page's file inputs apart. That was
+on the pipeline's side, not a wall on the site. Fill the form as usual and,
+at the resume field, end your turn with NEED_UPLOAD: resume (rule 5). If the
+reply is UPLOAD_FAILED and lists several inputs, ask once more with a hint
+copied from that list. Never attach files yourself. Report stuck only if
+NEED_UPLOAD fails again this time. Never clear cookies or site data to get a
+"fresh session" - that signs the candidate out of LinkedIn for every later
+job."""
     elif previous_failure:
         retry_note = f"""
 
 RETRY NOTICE: a previous attempt on this exact job failed with:
   "{previous_failure}"
 Do NOT repeat the same approach that led to that failure. If it was a file
-upload problem, go straight to the browser_cdp DOM.setFileInputFiles path
-(section 5b of your instructions) instead of trying the click-based upload
-again. If it was a tool-call budget problem, work faster and skip redundant
+upload problem, ask NEED_UPLOAD again (rule 5b) with a hint copied from the
+UPLOAD_FAILED list, or click further so the field exists first - never attach
+files yourself. If it was a tool-call budget problem, work faster and skip redundant
 re-snapshots. If it was a captcha/login wall, only retry once more before
 reporting the same status again - don't loop on an unsolvable blocker. Never
 clear cookies or site data to get a "fresh session" - that signs the candidate out of

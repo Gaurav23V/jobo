@@ -178,6 +178,33 @@ def _checks() -> int:
     except RuntimeError as e:
         check("twins that differ only in class (unstable) still refuse", "identity" in str(e), str(e))
 
+    print("\nRetry notice after an ambiguous-upload refusal (2127's stored status)")
+    from module4 import prompts
+    stored = ('Dayforce form has two identical "jobPostingApplication_files_resume" file inputs '
+              '(one under "Candidate Info" import, one under "Resume Upload") that the upload '
+              "pipeline could not disambiguate even with distinguishing hints (aria-required, "
+              "section quote), so no resume could be verified as attached and the upload "
+              "request cap (4) was reached before Submit")
+
+    def retry(previous: str | None) -> str:
+        return prompts.user_prompt(
+            job_id=2127, company="Acme", title="Dev", url="https://jobs.dayforcehcm.com/x",
+            resume_path="/tmp/r.pdf", cover_path=None, previous_failure=previous)
+
+    note = retry(stored)
+    check("asks NEED_UPLOAD again instead of quoting the refusal",
+          "end your turn with NEED_UPLOAD: resume" in note and "disambiguate even" not in note)
+    check("never sends the agent to DOM.setFileInputFiles", "setFileInputFiles" not in note)
+    check("uploader's own refusal text gets the same notice",
+          "NEED_UPLOAD: resume (rule 5)" in retry("4 file input(s) found; ambiguous original upload identity"))
+    check("cap-only status gets it too",
+          "NEED_UPLOAD: resume (rule 5)" in retry("Agent exceeded 4 upload requests; refusing further ones."))
+    other = retry("resume upload failed: no file input")
+    check("other upload failures stay quoted, generic notice no longer says setFileInputFiles",
+          "no file input" in other and "setFileInputFiles" not in other)
+    check("captcha failure keeps the generic notice", "(rule 5)" not in retry("captcha wall on apply page"))
+    check("first attempt has no notice", "RETRY NOTICE" not in retry(None))
+
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} passed")
     return 0 if passed == len(results) else 1
