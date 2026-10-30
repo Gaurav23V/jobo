@@ -1233,21 +1233,32 @@ def sender_rejection(from_hdr: str, body: str, site: SiteHint, other_senders: st
 # A `from:myworkdayjobs.com` search finds neither (job 1523), leaving only the
 # unfiltered pass, which sees just the newest 15 mails of the day.
 _WORKDAY_MAIL_DOMAINS = ("myworkdayjobs.com", "myworkdaysite.com", "myworkday.com", "workday.com")
+# amazon.jobs mails its "Verify your email" code as "Your Amazon A to Z
+# verification code" from noreply@portal-na.idprism-auth.amazon.dev (job 2897).
+_AMAZON_JOBS_MAIL_DOMAINS = ("amazon.jobs", "amazon.dev")
+_VENDOR_MAIL_DOMAINS = (_WORKDAY_MAIL_DOMAINS, _AMAZON_JOBS_MAIL_DOMAINS)
 
 
 def _from_filter(sender: str) -> str:
     """Gmail `from:` term for a cleaned sender, widened to the vendor's mail domains."""
-    if any(sender == d or sender.endswith("." + d) for d in _WORKDAY_MAIL_DOMAINS):
-        return "from:(" + " OR ".join(_WORKDAY_MAIL_DOMAINS) + ")"
+    for domains in _VENDOR_MAIL_DOMAINS:
+        if any(sender == d or sender.endswith("." + d) for d in domains):
+            return "from:(" + " OR ".join(domains) + ")"
     return f"from:{sender}"
 
 
 def _build_query(*, sender: str, minutes: int, subject_hint: str) -> str:
     """Gmail search query. `newer_than` only supports d/m/y, so we filter
-    precisely on the message's internalDate afterwards."""
+    precisely on the message's internalDate afterwards.
+
+    A sender-filtered search also covers Spam (never Trash): Gmail's default
+    search skips Spam, where both of job 2897's amazon.jobs codes landed. The
+    unfiltered search stays out of Spam, where phishing "verification code"
+    mail sits."""
     parts = ["newer_than:1d"]
     if sender:
         parts.append(_from_filter(sender))
+        parts.append("in:anywhere -in:trash")
     if subject_hint:
         cleaned = subject_hint.replace('"', " ").strip()
         if cleaned:
