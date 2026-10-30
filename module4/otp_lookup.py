@@ -475,6 +475,40 @@ _SUBJECT_CODE_WORD_RE = re.compile(
     r"(?<![a-z0-9])(code|otp|pin|passcode|password|verification|verify)(?![a-z0-9])"
 )
 
+# Taleo's multifactor mail (job 3435, 2026-10-30) puts the code alone on the
+# line under "Access Code:", and the code is 10 printable characters with
+# punctuation in it ("Tz#=kQ4?Wm"). _CODE_RE only knows
+# letters and digits, so the mail was read on every poll and passed over in
+# silence while the agent reported "no code arrived". A token like that is
+# only taken straight after an explicit "<kind> code:" label.
+_LABELLED_TOKEN_RE = re.compile(
+    r"(?<![a-z0-9])(?:(?:access|verification|security|one[- ]time|authentication|"
+    r"login|sign[- ]in|confirmation|activation|temporary)\s+code|passcode)"
+    r"\s*:\s*([!-~]{6,16})(?=\s|$)",
+    re.IGNORECASE,
+)
+
+
+def _labelled_symbol_code(text: str) -> Optional[str]:
+    """A code with punctuation in it, right after a "... code:" label.
+
+    Only tokens that carry a letter, at least four letters/digits and a
+    symbol inside them. A plain alphanumeric code (or one with only a full
+    stop after it) is left to the usual rules, and dates, phone numbers,
+    amounts, URLs and addresses never qualify.
+    """
+    for m in _LABELLED_TOKEN_RE.finditer(text):
+        token = m.group(1)
+        core = token.strip(".,;:!?\"'()[]")
+        if core.isalnum() or "://" in token or token.lower().startswith("www."):
+            continue
+        if re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", core):
+            continue
+        if not re.search(r"[A-Za-z]", token) or sum(c.isalnum() for c in token) < 4:
+            continue
+        return token
+    return None
+
 
 def _strip_html(text: str) -> str:
     """Tags -> spaces, so per-digit <td> cells become separated digit groups.
@@ -569,6 +603,12 @@ def extract_code(
             return True
         length, digits_only = shape
         return len(token) == length and (token.isdigit() or not digits_only)
+
+    # 0. A labelled code with punctuation in it (Taleo). Checked first, so a
+    # letters-and-digits slice of it can never be returned instead.
+    labelled = _labelled_symbol_code(text)
+    if labelled and fits(labelled):
+        return labelled
 
     # 1. Context-phrase adjacency. "<code> is your ... code" is checked
     # first: there the label can be far behind the code (see _LEAD_CODE_RE).
@@ -1428,6 +1468,13 @@ def _search_pass(
                     ),
                     scanned,
                 )
+        # Said out loud: job 3435's code mail was read here on every poll and
+        # nothing in the log showed it had ever been found.
+        logger.info(
+            "otp_lookup: read message from %s (subject=%r) but found no code in it",
+            from_hdr,
+            subject[:60],
+        )
 
     return None, scanned
 
