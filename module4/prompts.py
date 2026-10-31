@@ -297,8 +297,11 @@ Then set one by its NUMBER:
 The number identifies the listed control. If the form changed, list fields
 again rather than guessing another number. For `select` controls, choose a
 listed value verbatim. For a radio option, use its own number and label/value
-(e.g. the No option = No means SELECT No, not uncheck it); for checkboxes use
-true or false. The helper verifies checked state without changing option values.
+(e.g. the No option = No means SELECT No, not uncheck it). Radios listed under
+their question carry their answer as option='Yes' / option='No': set the number
+whose option is your answer. For checkboxes use true or false. The helper
+verifies checked state without changing option values. An error='...' on a
+field is the form's own complaint about the value it holds; fix that value.
 To clear an optional plain-text field, use `NEED_FIELD: #N = ""` on ONE line;
 this exact empty-string token clears it. Do not put its value on the next line.
 For a calendar-only year/month field, use yyyy or MM/yyyy with the precision

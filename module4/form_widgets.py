@@ -68,8 +68,8 @@ WIDGET_JS = r"""
     while(top?.shadowRoot) {const deep=top.shadowRoot.elementFromPoint(x,y);if(!deep||deep===top)break;top=deep;}
     return hitOwns(s,top) && (!check || ownsHit(node,top));
   };
-  const finish = async (read, expected) => {
-    await sleep(650);
+  const finish = async (read, expected, settled=false) => {
+    if(!settled) await sleep(650);
     if(!valid()) return invalid();
     const value = read();
     return {...out, ok:value !== null && norm(value)===norm(expected),
@@ -83,8 +83,11 @@ WIDGET_JS = r"""
       const w=norm(want);
       if (w==='true' || w==='checked') desired=true;
       else if (w==='false' || w==='unchecked') desired=false;
-      else if (w && (w===norm(el.value) || w===norm(state.label))) desired=true;
+      else if (w && (w===norm(el.value) || w===norm(state.label) || w===norm(state.option))) desired=true;
       else if (kind==='checkbox' && ['yes','no'].includes(w)) desired=w==='yes';
+      else if (kind==='radio' && state.option) return fail('this radio is the '+JSON.stringify(state.option)+
+        ' option; to answer '+JSON.stringify(want)+' set the radio listed with option='+JSON.stringify(want)+
+        ' by its own number');
       else return fail('use true/false or this exact option label/value; no other radio will be chosen');
       out.strategy='trusted-'+kind;
       if (el.checked!==desired || el.indeterminate) {
@@ -103,10 +106,21 @@ WIDGET_JS = r"""
           out.strategy+='+dom-click';
         }
       }
+      await sleep(650);
+      if (!el.isConnected && performance.now()<deadline) {
+        // The site swapped the node it checked (LinkedIn, GHO-112): read the
+        // one replacement with this group, question and option text.
+        const rep=state.replacement && state.replacement();
+        if (!rep || !enabled(rep)) return invalid();
+        const ok=rep.checked===desired && !rep.indeterminate;
+        out.strategy+='+replaced-node';
+        return {...out, ok, readback:String(rep.checked), reverted:!ok,
+          note:ok ? '' : 'widget selection did not persist on the exact control'};
+      }
       return await finish(()=>{
         const aria=wrapper?.getAttribute('aria-checked');
         return el.indeterminate || (aria!=null && aria!==String(el.checked)) ? null : String(el.checked);
-      },String(desired));
+      },String(desired),true);
     }
     if (kind==='bare-combobox') {
       out.strategy='trusted-listbox';
@@ -411,10 +425,14 @@ WIDGET_JS = r"""
     return fail('calendar navigation limit reached; no value injected');
   }
   const iterator=run();
+  // The choice our click checked was re-mounted (LinkedIn): let run() read
+  // its one exact replacement instead of calling the click a failure.
+  const replaced=()=>['radio','checkbox'].includes(kind) && !el.isConnected &&
+    performance.now()<deadline && !!(state.replacement && state.replacement());
   return {guard, next:async()=>{
-    if(!valid()) return {done:true,result:invalid()};
+    if(!valid() && !replaced()) return {done:true,result:invalid()};
     const step=await iterator.next();
-    if(!valid()) return {done:true,result:invalid()};
+    if(!valid() && !(step.done && replaced())) return {done:true,result:invalid()};
     if(step.done) return {done:true,result:step.value};
     const {node,key,check,text,clear,noEnter}=step.value;
     const identity=nodeIdentity(node);

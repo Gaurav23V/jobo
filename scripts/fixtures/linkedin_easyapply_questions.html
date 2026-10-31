@@ -1,0 +1,63 @@
+<!doctype html>
+<!-- LinkedIn Easy Apply "Additional Questions" step (5/7), as served on
+     2026-10-31 for job 2802 (GHO-112), employer renamed. Classes (hashed) and
+     the 180 other nationality boxes are dropped; structure, ids, aria
+     attributes and the helper-text nodes are as probed. -->
+<html><head><meta charset="utf-8"><title>Apply to Consolidated</title></head><body>
+<div role="dialog" aria-label="Apply to Consolidated"><h2>Apply to Consolidated</h2><p>5/7 pages</p><h3>Additional Questions</h3>
+<div><p>In Consolidated we are proud to have colleagues from over 70 different nationalities working with us as colleagues. We would love if you would let us know what nationality/nationalities you are by selecting from the list below:*</p><fieldset aria-describedby="error-message-_r_es_"><div><div><div><div><input id="_r_eu_" tabindex="0" type="checkbox"><label for="_r_eu_"></label></div><p>Afghan</p></div></div><div><div><div><input id="_r_f0_" tabindex="0" type="checkbox"><label for="_r_f0_"></label></div><p>Albanian</p></div></div><div><div><div><input id="_r_f2_" tabindex="0" type="checkbox"><label for="_r_f2_"></label></div><p>Algerian</p></div></div></div></fieldset></div>
+<div><p>Do you currently have full right to work in India without the need of support from a business to take up a new role?*</p><fieldset aria-describedby="error-message-_r_qj_" role="radiogroup"><div><div><div><div><input id="_r_ql_" aria-label="Do you currently have full right to work in India without the need of support from a business to take up a new role?" tabindex="0" type="radio" name="radio-group-_r_qj_"><label for="_r_ql_"></label></div><div><p>Yes</p></div></div></div><div><div><div><input id="_r_qn_" aria-label="Do you currently have full right to work in India without the need of support from a business to take up a new role?" tabindex="0" type="radio" name="radio-group-_r_qj_"><label for="_r_qn_"></label></div><div><p>No</p></div></div></div></div></fieldset></div>
+<div><p>Are you based within a commutable distance of the Pune Consolidated office?*</p><fieldset aria-describedby="error-message-_r_qo_" role="radiogroup"><div><div><div><div><input id="_r_qq_" aria-label="Are you based within a commutable distance of the Pune Consolidated office?" tabindex="0" type="radio" name="radio-group-_r_qo_"><label for="_r_qq_"></label></div><div><p>Yes</p></div></div></div><div><div><div><input id="_r_qs_" aria-label="Are you based within a commutable distance of the Pune Consolidated office?" tabindex="0" type="radio" name="radio-group-_r_qo_"><label for="_r_qs_"></label></div><div><p>No</p></div></div></div></div></fieldset></div>
+<div><p>In Consolidated we operate a Hybrid working week made up of a mix of working both in the office and from home. Are you happy with working in a hybrid environment and able to commit to working in the office part of the week?*</p><fieldset aria-describedby="error-message-_r_qv_" role="radiogroup"><div><div><div><div><input id="_r_r1_" aria-label="In Consolidated we operate a Hybrid working week made up of a mix of working both in the office and from home. Are you happy with working in a hybrid environment and able to commit to working in the office part of the week?" tabindex="0" type="radio" name="radio-group-_r_qv_"><label for="_r_r1_"></label></div><div><p>Yes</p></div></div></div><div><div><div><input id="_r_r3_" aria-label="In Consolidated we operate a Hybrid working week made up of a mix of working both in the office and from home. Are you happy with working in a hybrid environment and able to commit to working in the office part of the week?" tabindex="0" type="radio" name="radio-group-_r_qv_"><label for="_r_r3_"></label></div><div><p>No</p></div></div></div></div></fieldset></div>
+<div><div><input required="" id="_r_r6_" dir="auto" aria-describedby="_r_r6_-info" aria-label="Please advise your current fixed CTC" type="text"></div><div data-testid="text-input-helper-text" id="_r_r6_-info"><div><p aria-live="polite" aria-atomic="true"><span aria-hidden="true">0/20</span><span>0 of 20 characters</span></p></div></div></div>
+<div><div><input required="" id="_r_r7_" dir="auto" aria-describedby="_r_r7_-info" aria-label="Please advise on your expectations for your fixed CTC should you successfully start in this role" type="text"></div><div data-testid="text-input-helper-text" id="_r_r7_-info"><div><p aria-live="polite" aria-atomic="true"><span aria-hidden="true">0/20</span><span>0 of 20 characters</span></p></div></div></div>
+<div><div><input required="" id="_r_r8_" dir="auto" aria-describedby="_r_r8_-info" aria-label="Please advise your notice period" type="text"></div><div data-testid="text-input-helper-text" id="_r_r8_-info"><div><p aria-live="polite" aria-atomic="true"><span aria-hidden="true">0/200</span><span>0 of 200 characters</span></p></div></div></div>
+<button id="back" type="button">Back</button><button id="next" type="button">Next</button>
+</div>
+<script>
+// Emulates what the probe saw LinkedIn do (the real page is a React bundle):
+// 1. Checking a radio re-mounts it as a new node with a new React id
+//    (_r_ql_ became _r_ro_), in the same group, still checked.
+// 2. Next validates: the CTC boxes take digits only ("7 LPA" -> "Invalid
+//    input", 700000 passes), an empty box says "This field is required", and
+//    an unanswered question gets that line right after its fieldset.
+let nextId = 900;
+document.addEventListener('change', e => {
+  const r = e.target;
+  if (!r.matches('input[type=radio]') || !r.checked) return;
+  const fresh = r.cloneNode(true);
+  fresh.id = '_r_' + (nextId++).toString(36) + '_';
+  r.nextElementSibling.htmlFor = fresh.id;
+  r.replaceWith(fresh);
+  fresh.checked = true;
+});
+document.addEventListener('input', e => {
+  const h = document.getElementById(e.target.id + '-info');
+  const c = h && h.querySelector('[aria-live]');
+  if (c) {
+    const max = c.firstElementChild.textContent.split('/')[1], n = e.target.value.length;
+    c.innerHTML = '<span aria-hidden="true">' + n + '/' + max + '</span><span>' + n + ' of ' + max + ' characters</span>';
+  }
+});
+document.getElementById('next').addEventListener('click', () => {
+  let ok = true;
+  document.querySelectorAll('fieldset').forEach(fs => {
+    const answered = !!fs.querySelector('input:checked');
+    const msg = fs.nextElementSibling && fs.nextElementSibling.tagName === 'P' ? fs.nextElementSibling : null;
+    if (!answered && !msg) fs.insertAdjacentHTML('afterend', '<p>This field is required</p>');
+    if (answered && msg) msg.remove();
+    ok = ok && answered;
+  });
+  document.querySelectorAll('[data-testid=text-input-helper-text]').forEach(h => {
+    const i = document.getElementById(h.id.replace(/-info$/, ''));
+    const bad = !i.value ? 'This field is required'
+      : /CTC/.test(i.getAttribute('aria-label')) && !/^\d+$/.test(i.value) ? 'Invalid input' : '';
+    const p = h.querySelector(':scope > p');
+    if (p) p.remove();
+    if (bad) h.insertAdjacentHTML('afterbegin', '<p>' + bad + '</p>');
+    ok = ok && !bad;
+  });
+  document.body.dataset.page = ok ? 'advanced' : 'blocked';
+});
+</script>
+</body></html>

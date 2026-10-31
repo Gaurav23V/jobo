@@ -122,6 +122,27 @@ _COLLECT_JS = r"""
     if (!lg || fs.querySelectorAll('input[type=checkbox], input[type=radio]').length !== 1) return '';
     return (lg.innerText || lg.textContent || '').replace(/\s+/g, ' ').trim();
   };
+  // A radio/checkbox's OWN option text: the widest wrapper that still holds
+  // only this one choice, below its group. LinkedIn's Easy Apply names every
+  // radio by its question (aria-label) and puts "Yes"/"No" in a sibling <p>,
+  // so Consolidated 2802 listed both radios of each right-to-work question
+  // under the question text alone and the agent guessed which was Yes (GHO-112).
+  const CHOICE = 'input[type=checkbox], input[type=radio]';
+  const choiceText = el => {
+    if (!el.matches(CHOICE)) return '';
+    let text = '';
+    for (let p = el.parentElement, h = 0; p && h < 4; p = p.parentElement, h++) {
+      if (p.matches('fieldset, [role=radiogroup], [role=group], form, body') ||
+          p.querySelectorAll(CHOICE).length !== 1) break;
+      const t = (p.innerText || p.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t && t.length < 120) text = t;
+    }
+    return text;
+  };
+  // React's useId ids (":r1:", "«r1»", "_r_1_") are re-issued when a node is
+  // re-mounted, and LinkedIn re-mounts a radio the moment it is checked. They
+  // are not identity for a choice; its group name and option text are.
+  const REACT_ID = /^(:r[0-9a-z]+:|«r[0-9a-z]+»|_r_[0-9a-z]+_)$/i;
   const controls = [];
   const seen = new Set();
   const addCtl = (el) => {
@@ -205,14 +226,18 @@ _COLLECT_JS = r"""
       if (shown && label.length > shown.length && label.endsWith(shown))
         label = label.slice(0, -shown.length).trim();
     }
-    const meta = [label, el.name, el.id, el.getAttribute('aria-label'),
+    // Shown only when it says something the label does not.
+    const own = choiceText(el);
+    const option = own && norm(own) !== norm(label) && !norm(own).includes(norm(label)) ? own : '';
+    const meta = [label, option, el.name, el.id, el.getAttribute('aria-label'),
                   el.getAttribute('placeholder'), el.getAttribute('data-testid')]
                  .filter(Boolean).join(' | ');
     // A signature that survives a re-enumeration but changes if the control at
     // this position is genuinely a different one.
-    const sig = [el.tagName, el.id || '', el.name || '', norm(label).slice(0, 40),
-      type, ['radio','checkbox'].includes(type) ? el.value : ''].join('~');
-    controls.push({el: el, label: label, meta: meta, metaN: norm(meta), sig: sig});
+    const choice = ['radio','checkbox'].includes(type);
+    const sig = [el.tagName, choice && REACT_ID.test(el.id || '') ? '' : el.id || '', el.name || '',
+      norm(label).slice(0, 40), type, choice ? el.value : '', norm(option).slice(0, 40)].join('~');
+    controls.push({el: el, label: label, option: option, meta: meta, metaN: norm(meta), sig: sig});
   };
   // Bare comboboxes are set through their own real listbox, not a value setter.
   // Wrappers with backing controls still represent only one logical field.
@@ -259,6 +284,36 @@ LIST_PAGE = 60
 _LIST_FIELDS_JS = r"""
 (function(start) {
 __COLLECT__
+  // The site's own message on a control: its aria-errormessage/-describedby
+  // text, or for a choice group the line right after its fieldset. LinkedIn
+  // showed "Invalid input" under both CTC boxes of Consolidated 2802 and the
+  // listing said nothing, so the agent spent ~60 steps of console scripts
+  // finding it (GHO-112). Character counters ("6/20") are not messages.
+  const ERR = /invalid|required|must |please (enter|select|provide|choose)|not valid|incorrect|too (long|short)|at (least|most)|only (numbers|digits)|enter a |error/i;
+  const COUNTER = /^\d+\s*\/\s*\d+$|^\d+ of \d+ characters?\b/i;
+  const shown = n => !!n && (n.checkVisibility ? n.checkVisibility() : n.getClientRects().length > 0);
+  const lines = n => shown(n) ? (n.innerText || '').split('\n').map(s => s.replace(/\s+/g, ' ').trim())
+    .filter(s => s && s.length <= 120 && !COUNTER.test(s) && !/^\*?\s*required\.?$/i.test(s) && ERR.test(s)) : [];
+  const fieldError = el => {
+    const root = el.getRootNode();
+    const byId = id => root.getElementById ? root.getElementById(id) : document.getElementById(id);
+    const ids = ((el.getAttribute('aria-errormessage') || '') + ' ' + (el.getAttribute('aria-describedby') || '')).split(/\s+/);
+    const grp = el.matches(CHOICE) ? el.closest('fieldset, [role=radiogroup], [role=group]') : null;
+    if (grp) ids.push(...(grp.getAttribute('aria-describedby') || '').split(/\s+/));
+    const found = [];
+    ids.filter(Boolean).forEach(id => found.push(...lines(byId(id))));
+    const after = grp && grp.nextElementSibling;
+    if (after && !after.querySelector('input, select, textarea')) found.push(...lines(after));
+    return [...new Set(found)].join(' / ').slice(0, 120);
+  };
+  // A box that takes digits only. LinkedIn gives its salary questions no
+  // type/inputmode/pattern, but rejects "7 LPA" as "Invalid input" and takes
+  // the bare number (probe of Consolidated 2802, 2026-10-31).
+  const MONEY = /\b(ctc|salary|compensation|remuneration)\b/i;
+  const numeric = (el, label) => el.matches('input') && (el.type === 'number' ||
+    /^(numeric|decimal)$/i.test(el.getAttribute('inputmode') || '') ||
+    /^\^?(\\d|\[0-9\])[^a-z]*\$?$/i.test(el.getAttribute('pattern') || '') ||
+    (/(^|\.)linkedin\.com$/.test(location.hostname) && el.type === 'text' && MONEY.test(label)));
   const describe = (c) => {
     const el = c.el;
     let kind = el.tagName.toLowerCase();
@@ -322,7 +377,8 @@ __COLLECT__
     }
     return {label: (c.label || c.meta || '(unlabelled)').slice(0, 80),
             meta: c.meta.slice(0, 120), kind: kind, sig: c.sig,
-            options: opts, value: cur,
+            options: opts, value: cur, option: c.option || '', error: fieldError(el),
+            numeric: numeric(el, c.label || ''),
             checked: ['radio','checkbox'].includes(el.type) ? !!el.checked : null,
             // One checked box answers a multi-box question (Workday Race/
             // Ethnicity marks every box required, GHO-72).
@@ -531,7 +587,18 @@ __COLLECT__
       specialKind==='bare-combobox' ? null : el.getAttribute('aria-labelledby'),
       ['radio','checkbox'].includes(specialKind) ? el.value : null];
     const original=identity(), originalValue=el.value;
-    window[token]={el, want, out, kind:specialKind, label:target.label, originalValue,
+    // LinkedIn re-mounts a radio as it is checked: a new node with a new React
+    // id, in the same group, with the same question and option text. Only that
+    // one node counts as the checked control; anything less exact is refused.
+    const own=choiceText(el), group=el.closest('fieldset,[role=radiogroup],[role=group]'), root=el.getRootNode();
+    const replacement=()=>{
+      if(el.isConnected || !own || !(el.name || group?.isConnected)) return null;
+      const same=[...root.querySelectorAll('input[type='+el.type+']')].filter(n=>n.isConnected &&
+        (el.name ? n.name===el.name : group.contains(n)) && n.form===original[4] &&
+        accessibleLabel(n)===original[6] && choiceText(n)===own);
+      return same.length===1 ? same[0] : null;
+    };
+    window[token]={el, want, out, kind:specialKind, label:target.label, option:own, originalValue, replacement,
       valid:()=>el.isConnected && identity().every((v,i)=>v===original[i])};
     return JSON.stringify({...out, widgetToken:token});
   }
@@ -1236,18 +1303,34 @@ class FieldInfo:
     checked: Optional[bool] = None
     # For a box in a multi-box question: is any box of that question checked.
     group_checked: Optional[bool] = None
+    # A radio/checkbox's own option text ("Yes") when its label is the question.
+    option: str = ""
+    # What the site itself says under this control ("Invalid input").
+    error: str = ""
+    # The box takes digits only (see `bare_amount`).
+    numeric: bool = False
 
     def as_line(self) -> str:
         bits = [f"#{self.index}", f"{self.label or self.meta or '(unlabelled)'}"]
         detail = [self.kind]
+        if self.option:
+            detail.append(f"option={self.option!r}")
         if self.checked is not None:
             detail.append('checked=' + str(self.checked).lower())
         if self.required:
             detail.append("required")
-        if self.value:
+        if self.numeric:
+            detail.append("numbers only")
+        # "on" is the browser's default value for a choice: it says nothing.
+        if self.value and not (self.checked is not None and self.value == "on"):
             key = "option_value" if self.checked is not None else "currently"
             detail.append(f"{key}={self.value!r}")
+        if self.error:
+            detail.append(f"error={self.error!r}")
         line = f"  {bits[0]:>4}  {bits[1]}  [{', '.join(detail)}]"
+        bare = bare_amount(self.value, self.label) if self.error else None
+        if bare:
+            line += f"\n         the site rejects {self.value!r}: enter the bare number {bare}"
         if self.options:
             # Show them ALL. The agent picks a value from this list, so any
             # option hidden behind a "..." is one it will waste turns guessing
@@ -1304,6 +1387,12 @@ class ListFieldsResult:
             # answer to "which field is still invalid".
             tail += ("\nThe site itself still flags: " + " / ".join(e.rstrip(". ") for e in self.site_errors[:8])
                      + ". Fix exactly these; a field the site does not flag is fine as it is.")
+        flagged = [f for f in self.fields if f.error]
+        if flagged:
+            tail += ("\nThe form shows an error under: " + ", ".join(
+                f"#{f.index} {f.error!r}" for f in flagged[:12])
+                + ". Next will not advance until these are fixed; an 'Invalid input' "
+                "usually means the format (digits only, no units) is wrong, not the answer.")
         if empty:
             names = ", ".join(f"#{f.index} {f.label or f.meta or '(unlabelled)'}" for f in empty)
             return (f"Required and still EMPTY: {names}. Fill these. Leave fields that "
@@ -1567,6 +1656,9 @@ def list_fields(cdp_url: str, start: int = 1) -> ListFieldsResult:
             options=f.get("options") or None,
             checked=f.get("checked"),
             group_checked=f.get("group_checked"),
+            option=f.get("option") or "",
+            error=f.get("error") or "",
+            numeric=bool(f.get("numeric")),
         )
         for i, f in enumerate(data.get("fields") or [])
     ]
@@ -1599,6 +1691,45 @@ _LAST_LISTING: dict[str, list[str]] = {}
 # (kind, label) per listed control, so the driver can tell a password field
 # from the number the agent uses (agent_driver._enforce_account_password).
 _LAST_KINDS: dict[str, list[tuple[str, str]]] = {}
+# Numbers of the listed controls that take digits only.
+_LAST_NUMERIC: dict[str, set[int]] = {}
+
+# "7 LPA", "₹7,00,000", "7.5 lakh", "1.2 Cr", "700k": an amount the
+# candidate facts (and the agent) write with an Indian unit.
+_AMOUNT_RE = re.compile(
+    r"^\s*(?:₹|rs\.?|inr)?\s*(\d+(?:[.,]\d+)*)\s*(lpa|lakhs?|lacs?|l|cr|crores?|k)?"
+    r"\s*(?:inr|rupees|per annum|p\.?\s?a\.?|/\s*(?:yr|year|annum))?\s*$", re.I)
+_IN_LAKHS_RE = re.compile(r"\b(lpa|lakhs?|lacs?)\b", re.I)
+
+
+def bare_amount(value: str, label: str = "") -> Optional[str]:
+    """The digits a numbers-only salary box wants for `value`, or None.
+
+    LinkedIn's Easy Apply rejects "7 LPA" with "Invalid input" and takes
+    700000 (Consolidated 2802, GHO-112). A box whose label asks for lakhs gets
+    the amount in lakhs. Values without a unit or grouping commas are left as
+    they are, and anything that is not an amount ("30 days") is None.
+    """
+    m = _AMOUNT_RE.match(value or "")
+    if not m:
+        return None
+    digits, unit = m.group(1), (m.group(2) or "").lower()
+    if not unit and "," not in digits:
+        return None
+    try:
+        n = float(digits.replace(",", ""))
+    except ValueError:
+        return None
+    in_lakhs = bool(_IN_LAKHS_RE.search(label or ""))
+    if unit in ("lpa", "lakh", "lakhs", "lac", "lacs", "l"):
+        n *= 1 if in_lakhs else 100_000
+    elif unit in ("cr", "crore", "crores"):
+        n *= 100 if in_lakhs else 10_000_000
+    elif unit == "k":
+        n *= 1_000
+    elif in_lakhs:
+        return None  # a bare rupee figure for a lakhs box: not ours to rescale
+    return f"{n:g}" if in_lakhs else str(round(n))
 
 
 def remember_listing(cdp_url: str, result: ListFieldsResult) -> None:
@@ -1608,6 +1739,10 @@ def remember_listing(cdp_url: str, result: ListFieldsResult) -> None:
     first = result.fields[0].index if result.fields else 1
     sigs = _LAST_LISTING.get(cdp_url, []) if first > 1 else []
     kinds = _LAST_KINDS.get(cdp_url, []) if first > 1 else []
+    numeric = _LAST_NUMERIC.get(cdp_url, set()) if first > 1 else set()
+    numeric -= {f.index for f in result.fields}
+    numeric |= {f.index for f in result.fields if f.numeric}
+    _LAST_NUMERIC[cdp_url] = numeric
     for f in result.fields:
         while len(sigs) < f.index:
             sigs.append("")
@@ -1668,6 +1803,13 @@ def set_field(
         sigs = _LAST_LISTING.get(cdp_url) or []
         if 0 <= by_index < len(sigs):
             expect_sig = sigs[by_index]
+    # A numbers-only box gets the bare amount, not the facts' "7 LPA".
+    asked = value
+    if index in _LAST_NUMERIC.get(cdp_url, set()):
+        listed = listed_field(cdp_url, index)
+        value = bare_amount(value, listed[1] if listed else "") or value
+    converted = (f"this field takes numbers only, so {asked!r} was entered as {value}"
+                 if value != asked else "")
 
     def attempt_value(
         tab: dict, strict: bool, use_value: str
@@ -1721,6 +1863,8 @@ def set_field(
 
     # 1. The active page (CDP lists the frontmost target first).
     primary = attempt(targets[0], strict=False)
+    if primary and converted:
+        primary.note = "; ".join(n for n in (converted, primary.note) if n)
     if primary and primary.ok:
         logger.info(
             "set_field: %s = %r via %s (matched=%r readback=%r)",
