@@ -80,13 +80,16 @@ WIDGET_JS = r"""
     if (!valid()) return invalid();
     if (kind==='radio' || kind==='checkbox') {
       let desired;
-      const w=norm(want);
+      // The listing shows a choice as option='Yes'; an agent copying that
+      // whole token means the option text inside it (2802 retry, GHO-112).
+      const answer=String(want).replace(/^\s*option\s*=\s*(['"])(.*)\1\s*$/is,'$2');
+      const w=norm(answer);
       if (w==='true' || w==='checked') desired=true;
       else if (w==='false' || w==='unchecked') desired=false;
       else if (w && (w===norm(el.value) || w===norm(state.label) || w===norm(state.option))) desired=true;
       else if (kind==='checkbox' && ['yes','no'].includes(w)) desired=w==='yes';
       else if (kind==='radio' && state.option) return fail('this radio is the '+JSON.stringify(state.option)+
-        ' option; to answer '+JSON.stringify(want)+' set the radio listed with option='+JSON.stringify(want)+
+        ' option; to answer '+JSON.stringify(answer)+' set the radio listed with option='+JSON.stringify(answer)+
         ' by its own number');
       else return fail('use true/false or this exact option label/value; no other radio will be chosen');
       out.strategy='trusted-'+kind;

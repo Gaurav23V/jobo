@@ -125,6 +125,14 @@ def browser_part() -> None:
                       r.ok and checked(COMMUTE, "No") == [True], r.note)
                 r = f.set_field(cdp, f"#{c_no.index}", "true", index=c_no.index)
                 check("its number still holds after the re-mount ('true' again)", r.ok, r.note)
+                # The 2802 retry copied the listing token whole: "#188 = option='Yes'".
+                r = f.set_field(cdp, f"#{c_no.index}", "option='No'", index=c_no.index)
+                check("the listing token option='No' sets the No radio",
+                      r.ok and checked(COMMUTE, "No") == [True], r.note)
+                r = f.set_field(cdp, f"#{c_yes.index}", 'option="No"', index=c_yes.index)
+                check("...and on the Yes radio is refused naming plain 'No'",
+                      not r.ok and 'answer "No"' in r.note and "option='" not in r.note
+                      and checked(COMMUTE, "Yes") == [False], r.note)
 
                 print("\n[4] The form's own errors reach the listing")
                 ctc = find(ls, "Please advise your current fixed CTC")
