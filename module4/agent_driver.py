@@ -1161,7 +1161,26 @@ def _made_up_value_refusal(
     return made_up_values.agent_message(kind, label, value) if kind else ""
 
 
-_PASSWORD_LABEL_RE = re.compile(r"pass\s*word|passcode|\bpwd\b", re.I)
+# Whole words only: Blueyonder 2502 (GHO-115), a password-manager company,
+# asks "Why <Brand>Password?" in an essay box, and that box got the account
+# password as its answer.
+_PASSWORD_LABEL_RE = re.compile(r"(?<![a-z0-9])(?:pass\s*word|passcode|pwd)(?![a-z0-9])", re.I)
+
+
+def _is_password_field(kind: str, label: str) -> bool:
+    """A field that takes the account password.
+
+    The listed type decides: type=password is one; a textarea, select or
+    choice never is. A plain text box counts only when its label is a
+    password label and not a question, which is what a password field looks
+    like after its "show" toggle made it type=text. With no listing (a prose
+    hint) the label rule is all there is.
+    """
+    if kind == "password":
+        return True
+    if kind not in ("", "text"):
+        return False
+    return bool(_PASSWORD_LABEL_RE.search(label or "")) and "?" not in (label or "")
 
 
 def _enforce_account_password(
@@ -1186,11 +1205,10 @@ def _enforce_account_password(
         listed = form_filler.listed_field(cdp_url, index)
     except Exception:
         listed = None
-    kind, label = listed if listed else ("", "")
-    is_password = kind == "password" or bool(
-        _PASSWORD_LABEL_RE.search(f"{label} {field_hint if not index else ''}")
-    )
-    if not is_password or re.search(r"forgot|reset link|strength", label or field_hint, re.I):
+    kind, label = listed if listed else ("", "" if index else field_hint)
+    if not _is_password_field(kind, label) or re.search(
+        r"forgot|reset link|strength", label or field_hint, re.I
+    ):
         return value, ""
     site, recorded = _recorded_site_password(cdp_url, form_filler)
     standard = recorded or password_reset.STANDARD_PASSWORD

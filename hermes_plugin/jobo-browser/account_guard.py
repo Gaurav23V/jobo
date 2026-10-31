@@ -326,7 +326,10 @@ def check_tool_call(tool_name: str, args: dict | None) -> str | None:
 # tied to the field it targets ("Password *", "Confirm Password").
 _REF_NAMES: dict[str, str] = {}
 _REF_RE = re.compile(r'^\s*-\s*(\w+)\s+"([^"]*)"[^\n]*?\[[^\]]*\bref=(e\d+)', re.M)
-_PASSWORD_LABEL_RE = re.compile(r"pass\s*word|passcode|\bpwd\b", re.I)
+# Whole words only, and never a question: Blueyonder 2502 (GHO-115), a
+# password-manager company, asks "Why <Brand>Password?" in an essay box. The snapshot calls a password input a textbox
+# like any other, so its label is all there is to go on.
+_PASSWORD_LABEL_RE = re.compile(r"(?<![a-z0-9])(?:pass\s*word|passcode|pwd)(?![a-z0-9])", re.I)
 
 
 def remember_refs(snapshot: str) -> None:
@@ -336,8 +339,12 @@ def remember_refs(snapshot: str) -> None:
 
 def is_password_ref(ref) -> bool:
     name = _REF_NAMES.get(str(ref or "").lstrip("@"), "")
-    return bool(name) and bool(_PASSWORD_LABEL_RE.search(name)) and not re.search(
-        r"forgot|reset|show|hide|strength", name, re.I
+    role, _, label = name.partition(" ")
+    return (
+        role == "textbox"
+        and bool(_PASSWORD_LABEL_RE.search(label))
+        and "?" not in label
+        and not re.search(r"forgot|reset|show|hide|strength", label, re.I)
     )
 
 

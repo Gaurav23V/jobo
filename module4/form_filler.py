@@ -977,12 +977,18 @@ __COLLECT__
 
   // Find the listbox options the widget rendered, wherever it put them
   // (react-select portals them to <body>, outside the field's own container).
-  const findOptions = () => {
+  // `stale` holds what was already on screen before the widget was opened:
+  // Ashby's checkbox and yes/no groups carry "...-group-option" classes and
+  // are always visible, so on Blueyonder 2502 (GHO-115) they were read as the
+  // Current Location results before the places search answered, and the
+  // gender question's "Not listed" was clicked as the "closest" location.
+  const findOptions = (stale) => {
     const sels = ['[role=option]', '.select__option', '[class*="-option"]',
                   '.select2-results__option', '.chosen-results li'];
     const seenO = new Set(), found = [];
-    const add = o => {
+    const add = (o, own) => {
       if (seenO.has(o)) return;
+      if (stale && stale.has(o) && !own) return;
       const r = o.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) return;   // not actually shown
       seenO.add(o);
@@ -998,9 +1004,9 @@ __COLLECT__
                     (el.getAttribute('aria-owns') || '')).split(/\s+/).filter(Boolean);
     for (const id of linked) {
       const list = root.getElementById ? root.getElementById(id) : document.getElementById(id);
-      if (list) list.querySelectorAll('[role=option], [role=gridcell]').forEach(add);
+      if (list) list.querySelectorAll('[role=option], [role=gridcell]').forEach(o => add(o, true));
     }
-    for (const s of sels) document.querySelectorAll(s).forEach(add);
+    for (const s of sels) document.querySelectorAll(s).forEach(o => add(o, false));
     return found;
   };
 
@@ -1044,6 +1050,7 @@ __COLLECT__
     };
     const opener = el.closest('[class*="control"], [class*="select__"], ' +
                               '[role=combobox]') || el.parentElement || el;
+    const stale = new Set(findOptions());
     realClick(opener);
     await sleep(120);
     typeInto(el, want);
@@ -1051,7 +1058,7 @@ __COLLECT__
     let opts = [];
     for (let i = 0; i < 14; i++) {
       await sleep(160);
-      opts = findOptions();
+      opts = findOptions(stale);
       if (opts.length) break;
     }
     if (opts.length) {

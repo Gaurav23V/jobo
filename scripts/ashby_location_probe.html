@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ashby location typeahead probe (GHO-115)</title>
+<!--
+  Local copy of the shape of an Ashby application form (jobs.ashbyhq.com,
+  read 2026-10-31 on Blueyonder 2502):
+
+    <div class="ashby-application-form-field-entry" data-field-path="_systemfield_location">
+      <label for="_systemfield_location">Current Location</label>
+      <div class="_inputContainer"><input class="ashby-application-form-input-autocomplete"
+        placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false"
+        aria-haspopup="listbox" role="combobox"></div></div>
+
+  Typing runs a places search; the results arrive a moment later in a
+  div[role=listbox] (portalled, linked by aria-controls once open) of
+  div[role=option].ashby-application-form-input-autocomplete-popup-result.
+  A click on a result commits it. Text typed but never picked is wiped on
+  blur, so it never reaches Submit.
+
+  The same page always shows checkbox groups
+  (div.ashby-application-form-input-checkbox-group-option) and yes/no buttons
+  (button.ashby-application-form-input-yesno-option): option-classed nodes
+  that are not the location's results. The essay box below is labelled the way
+  a password-manager employer asked "Why us?".
+-->
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .ashby-application-form-field-entry { margin: 14px 0; }
+  [role=listbox] { position: absolute; background: #fff; border: 1px solid #888; z-index: 10; width: 360px; }
+  [role=option] { padding: 4px 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Frontend Developer application</h1>
+<form id="form">
+  <div class="ashby-application-form-field-entry" data-field-path="_systemfield_name">
+    <label for="_systemfield_name">Full Name</label>
+    <div><input placeholder="Type here..." id="_systemfield_name" name="_systemfield_name" type="text" required></div>
+  </div>
+  <div class="ashby-application-form-field-entry" data-field-path="_systemfield_location">
+    <label for="_systemfield_location">Current Location</label>
+    <div class="_inputContainer"><input id="loc" class="ashby-application-form-input-autocomplete"
+      placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false"
+      aria-haspopup="listbox" role="combobox" value=""></div>
+  </div>
+  <div class="ashby-application-form-field-entry" data-field-path="q-rel">
+    <label for="q-rel">Do you have close relationships with anyone working here?</label>
+    <div class="ashby-application-form-input-yesno">
+      <button type="button" class="_option ashby-application-form-input-yesno-option" aria-pressed="false" data-option="yes">Yes</button>
+      <button type="button" class="_option ashby-application-form-input-yesno-option" aria-pressed="false" data-option="no">No</button>
+      <input type="checkbox" tabindex="-1" name="q-rel" style="display:none">
+    </div>
+  </div>
+  <div class="ashby-application-form-field-entry" data-field-path="q-why">
+    <label for="q-why">Why 9Password?</label>
+    <div><input placeholder="Type here..." id="q-why" name="q-why" type="text"></div>
+  </div>
+  <div class="ashby-application-form-field-entry" data-field-path="q-gender">
+    <fieldset class="ashby-application-form-input-checkbox-group">
+      <label>Gender</label>
+      <div class="_option ashby-application-form-input-checkbox-group-option">
+        <span class="ashby-application-form-input-checkbox-group-option-checkbox"><input type="checkbox" id="g-0" name="Woman"></span>
+        <label for="g-0" class="ashby-application-form-input-checkbox-group-option-label">Woman</label></div>
+      <div class="_option ashby-application-form-input-checkbox-group-option">
+        <span class="ashby-application-form-input-checkbox-group-option-checkbox"><input type="checkbox" id="g-1" name="Man"></span>
+        <label for="g-1" class="ashby-application-form-input-checkbox-group-option-label">Man</label></div>
+      <div class="_option ashby-application-form-input-checkbox-group-option">
+        <span class="ashby-application-form-input-checkbox-group-option-checkbox"><input type="checkbox" id="g-2" name="Not listed"></span>
+        <label for="g-2" class="ashby-application-form-input-checkbox-group-option-label">Not listed</label></div>
+      <div class="_option ashby-application-form-input-checkbox-group-option">
+        <span class="ashby-application-form-input-checkbox-group-option-checkbox"><input type="checkbox" id="g-3" name="Prefer not to say"></span>
+        <label for="g-3" class="ashby-application-form-input-checkbox-group-option-label">Prefer not to say</label></div>
+    </fieldset>
+  </div>
+</form>
+
+<script>
+const PLACES = [
+  'Springfield, Illinois, India', 'Springfield, Ohio, United States',
+  'Springfield Gardens, New York, United States', 'Shelbyville, Kentucky, United States',
+  'India', 'Indiana, United States', 'Indianapolis, Indiana, United States',
+];
+window.committed = {location: ''};
+window.searches = [];
+const input = document.getElementById('loc');
+let list = null, timer = null;
+
+const close = () => {
+  if (list) list.remove();
+  list = null;
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-controls');
+};
+
+// A places search: every result shares the query's first word. Answers after
+// a network-like delay, so anything read straight after typing is not it.
+const search = (q) => {
+  const first = (q.toLowerCase().match(/[a-z]+/) || [''])[0];
+  return first ? PLACES.filter(p => p.toLowerCase().split(/[^a-z]+/).some(w => w.startsWith(first))) : [];
+};
+
+input.addEventListener('input', () => {
+  clearTimeout(timer);
+  const q = input.value;
+  timer = setTimeout(() => {
+    window.searches.push(q);
+    close();
+    const hits = search(q);
+    if (!hits.length) return;
+    list = document.createElement('div');
+    list.id = ':r0:';
+    list.setAttribute('role', 'listbox');
+    const r = input.getBoundingClientRect();
+    list.style.left = r.left + 'px';
+    list.style.top = (r.bottom + window.scrollY) + 'px';
+    hits.forEach((text, i) => {
+      const o = document.createElement('div');
+      o.setAttribute('role', 'option');
+      o.id = ':r' + (i + 1) + ':';
+      o.className = 'ashby-application-form-input-autocomplete-popup-result';
+      o.textContent = text;
+      o.addEventListener('click', () => {
+        window.committed.location = text;
+        input.value = text;
+        close();
+      });
+      list.appendChild(o);
+    });
+    document.body.appendChild(list);
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-controls', list.id);
+  }, 450);
+});
+input.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+// Typed text that was never picked does not survive leaving the field.
+input.addEventListener('blur', () => setTimeout(() => {
+  if (input.value !== window.committed.location) input.value = window.committed.location;
+}, 0));
+
+document.querySelectorAll('.ashby-application-form-input-yesno-option').forEach(b =>
+  b.addEventListener('click', () => b.setAttribute('aria-pressed', 'true')));
+</script>
+</body>
+</html>
