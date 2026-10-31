@@ -986,9 +986,17 @@ __COLLECT__
     const sels = ['[role=option]', '.select__option', '[class*="-option"]',
                   '.select2-results__option', '.chosen-results li'];
     const seenO = new Set(), found = [];
+    // A menu's status line is not an option. react-select renders its empty
+    // and loading states as "select__menu-notice--no-options" / "--loading",
+    // which `[class*="-option"]` matches: Razorpay 3468 (Greenhouse,
+    // 2026-10-31) read "No options" as the one option on offer, 0.3s after
+    // typing, for every query. Select2 does the same with __message.
+    const NOTICE = /menu-notice|no-?options|noOptions|loading|select2-results__message|no-results/i;
     const add = (o, own) => {
       if (seenO.has(o)) return;
       if (stale && stale.has(o) && !own) return;
+      if (o.getAttribute('role') !== 'option' &&
+          NOTICE.test((o.className || '').toString())) return;
       const r = o.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) return;   // not actually shown
       seenO.add(o);
@@ -1129,19 +1137,50 @@ __COLLECT__
           return ph && boxText === ph ? '' : boxText;
         }, wantN, bestS >= 2 ? pickedN : '');
       }
-      // Leave NO residue. We typed a query into this widget to make it search;
-      // if nothing matched, that text is still sitting in the input. Greenhouse
-      // (job516, 2026-09-11) treats a dirty combobox input as pending state and
-      // WIPES its sibling fields on the next render - the agent reported
-      // "School, Degree and Discipline share state, typing in one clears the
-      // others", which was our own leftover text, not their bug. Always restore
-      // the widget to the state we found it in before reporting failure.
-      abandonTyping();
+    }
+    // What the agent is told the site offers must be the widget's WHOLE list,
+    // not what our query left of it. A react-select filters as you type, so
+    // after "Senior Software Engineer" Razorpay's Current Designation showed
+    // nothing, though it offers three values (Experienced Professional, ...).
+    // Clear the query and read the menu again; a remote-search widget shows
+    // nothing for an empty query, and then only the filtered hits are known.
+    const optText = o => (o.innerText || o.textContent || '').trim();
+    const filtered = opts.map(optText).filter(Boolean);
+    let full = [];
+    try {
+      nativeSet(el, '');
+      el.dispatchEvent(new InputEvent('input', {bubbles: true, data: null}));
+      for (let i = 0; i < 4 && !full.length; i++) {
+        await sleep(120);
+        full = findOptions(stale).map(optText).filter(Boolean);
+      }
+      if (!full.length) {
+        el.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, key: 'ArrowDown'}));
+        await sleep(150);
+        full = findOptions(stale).map(optText).filter(Boolean);
+      }
+    } catch (e) {}
+    // Leave NO residue. We typed a query into this widget to make it search;
+    // if nothing matched, that text is still sitting in the input. Greenhouse
+    // (job516, 2026-09-11) treats a dirty combobox input as pending state and
+    // WIPES its sibling fields on the next render - the agent reported
+    // "School, Degree and Discipline share state, typing in one clears the
+    // others", which was our own leftover text, not their bug. Always restore
+    // the widget to the state we found it in before reporting failure.
+    abandonTyping();
+    const offered = [...new Set([...filtered, ...full])];
+    if (offered.length) {
       out.noMatch = true;
-      out.availableOptions = opts.map(o => (o.innerText || o.textContent || '').trim())
-                                 .filter(Boolean);
+      out.availableOptions = offered;
+      // Code may only auto-pick from what the QUERY matched. The whole list is
+      // for the agent to choose from: token containment would turn "Lakeshore
+      // State" into the different value "Lakeshore" (test_oracle_cx_select).
+      // An empty query result is still a failed search, so the answer book's
+      // other search spellings run as before.
+      out.pickOptions = filtered;
+      out.emptyRemote = !filtered.length;
       out.note = 'the dropdown opened but no option matched ' + JSON.stringify(want) +
-                 '. The site offers: ' + out.availableOptions.join(' / ');
+                 '. The site offers: ' + offered.join(' / ');
       return JSON.stringify(out);
     }
     // No options appeared at all. For a react-style combobox that means the
@@ -1149,7 +1188,6 @@ __COLLECT__
     // false success this rewrite exists to kill (the value is reverted on the
     // next render while we report ok). Fail honestly instead of falling
     // through to the generic text-input path.
-    abandonTyping();
     out.note = 'the dropdown produced no options for ' + JSON.stringify(want) +
                '. This widget only accepts a value picked from its own list, ' +
                'so there is nothing to select.';
@@ -1451,11 +1489,18 @@ class SetFieldResult:
     # A search-as-you-type widget that returned no results at all.
     empty_remote: bool = False
     available_options: list[str] = field(default_factory=list)
+    # The options code may auto-pick from: what the typed query matched. None
+    # means all of available_options (widgets that do not filter by query).
+    pick_options: Optional[list[str]] = None
     # Set when the answer book substituted an honest alternative phrasing.
     substituted: str = ""
     # The listed control was found again at this new number (rows inserted
     # above it since the listing); 0 when it was where it was listed.
     moved_to: int = 0
+
+    @property
+    def pickable(self) -> list[str]:
+        return self.available_options if self.pick_options is None else self.pick_options
 
     def as_agent_message(self) -> str:
         moved = (f"\n\nNote: {FIELD_MOVED_NOTE}{self.moved_to}; numbers after it "
@@ -1859,6 +1904,7 @@ def set_field(
                     no_match=bool(data.get("noMatch")),
                     empty_remote=bool(data.get("emptyRemote")),
                     available_options=data.get("availableOptions") or [],
+                    pick_options=data.get("pickOptions"),
                     moved_to=int(data.get("movedTo") or 0),
                 )
         except Exception as e:
@@ -1911,8 +1957,8 @@ def set_field(
                 )
             return retry
 
-        if answer_book is not None and primary.available_options:
-            alt = answer_book.pick_from_options(value, primary.available_options)
+        if answer_book is not None and primary.pickable:
+            alt = answer_book.pick_from_options(value, primary.pickable)
             if alt and _norm_py(alt) not in tried:
                 retry = try_alt(alt)
                 if retry and retry.ok:
@@ -1931,8 +1977,8 @@ def set_field(
                 res = try_alt(query)
                 if res and res.ok:
                     return res
-                if res and res.no_match and res.available_options:
-                    pick = answer_book.pick_from_options(value, res.available_options)
+                if res and res.no_match and res.pickable:
+                    pick = answer_book.pick_from_options(value, res.pickable)
                     if pick and _norm_py(pick) not in tried:
                         res = try_alt(pick)
                         if res and res.ok:

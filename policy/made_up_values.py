@@ -1,4 +1,5 @@
-"""Personal values the apply agent must never make up: postal codes, street numbers.
+"""Personal values the apply agent must never make up: postal codes, street
+numbers, a seniority in the current job title.
 
 The prompt has said since GHO-92 to never type personal data the candidate
 facts do not give. Larkspur 3015 (Oracle Recruiting CX, 2026-10-30) still asked
@@ -30,6 +31,16 @@ _POSTAL_FACT = re.compile(r"\b(?:pin\s*-?\s*code|pincode|postal\s*code|post\s*co
 ADDRESS_LABEL = re.compile(r"\b(?:address|street)\b", re.I)
 _NOT_STREET = re.compile(r"\b(?:e-?mail|web|website|ip|url|mac|wallet)\s*address\b", re.I)
 _URL = re.compile(r"https?://\S+|www\.\S+", re.I)
+# "Current Designation", "Current Job Title", "Present Role". Razorpay 3468
+# (Greenhouse, 2026-10-31) asked for "Senior" and "Senior Software Engineer"
+# on a required Current Designation; the facts give a title with no seniority.
+TITLE_LABEL = re.compile(
+    r"\bdesignation\b|\b(?:current|present|latest|most\s+recent)\s+(?:job\s+)?(?:title|role|position)\b",
+    re.I,
+)
+_SENIORITY = re.compile(
+    r"\b(?:senior|sr|lead|principal|staff|head|chief|manager|director|vp|architect)\b", re.I
+)
 
 
 def _known(facts: str) -> str:
@@ -50,6 +61,8 @@ def refusal(label: str, value: str, facts: str) -> str:
     the facts give (the facts must name a postal code and contain this value).
     "address": an address/street field and `value` carries a number (house,
     street or postal number) that is not in the facts.
+    "title": a current title/designation field and `value` claims a seniority
+    word (Senior, Lead, Manager, ...) the facts do not give.
     """
     value = str(value or "").strip()
     label = str(label or "")
@@ -63,11 +76,23 @@ def refusal(label: str, value: str, facts: str) -> str:
     if ADDRESS_LABEL.search(label) and not _NOT_STREET.search(label):
         if any(not _in_facts(n, known) for n in re.findall(r"\d+", value)):
             return "address"
+    if TITLE_LABEL.search(label):
+        if any(not _in_facts(w, known) for w in _SENIORITY.findall(value)):
+            return "title"
     return ""
 
 
 def agent_message(kind: str, label: str, value: str) -> str:
     """What the agent is told instead of the value being typed."""
+    if kind == "title":
+        return (
+            f"{label.strip()!r} asks for the candidate's CURRENT title, and "
+            f"{value.strip()!r} claims a seniority the candidate facts do not give, "
+            "so it was NOT set. Use the current title exactly as the candidate "
+            "facts state it, not the title of the job being applied for. For a "
+            "dropdown, pick the entry from the site's list that is true for that "
+            "title."
+        )
     what = "a postal/PIN/ZIP code" if kind == "postal" else "a street address with numbers"
     return (
         f"{label.strip()!r} asks for {what}, and {value.strip()!r} is not in the "

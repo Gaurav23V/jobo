@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+<head><title>Greenhouse react-select menu notice probe</title></head>
+<body style="font-family:sans-serif;max-width:700px;margin:30px auto">
+<h1>Greenhouse: react-select "No options" and "Loading..." notices</h1>
+<p>Reproduces the shape behind Razorpay 3468 (job-boards.greenhouse.io,
+2026-10-31). A react-select filters its list as you type; when nothing
+matches it renders <code>select__menu-notice--no-options</code> "No options",
+whose class contains "-option". "Current Designation" on that form offers the
+same three career-stage values as "Current Career Stage". "Current Location"
+here is a remote-search widget: "No options" while the query is debounced,
+then "Loading...", then the results.</p>
+
+<form id="application-form">
+  <label for="question_1">Current Designation*</label>
+  <div class="select__container" data-widget="designation">
+    <div class="select__control">
+      <div class="select__value-container">
+        <div class="select__input-container">
+          <input id="question_1" role="combobox" aria-autocomplete="list"
+                 aria-expanded="false" class="select__input" autocomplete="off">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <label for="question_2">Current Location*</label>
+  <div class="select__container" data-widget="location">
+    <div class="select__control">
+      <div class="select__value-container">
+        <div class="select__input-container">
+          <input id="question_2" role="combobox" aria-autocomplete="list"
+                 aria-expanded="false" class="select__input" autocomplete="off">
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+
+<script>
+(function () {
+  const CATALOGUE = ['Springfield, USA', 'Shelbyville, USA', 'Capital City, USA'];
+  const W = {
+    designation: {id: 'question_1', committed: '', remote: false,
+                  opts: ['Experienced Professional', 'College Grads / Fresher',
+                         'Student / College Intern']},
+    location:    {id: 'question_2', committed: '', remote: true, opts: []},
+  };
+  window.committed = {};
+
+  Object.entries(W).forEach(([key, w]) => {
+    const el = document.getElementById(w.id);
+    const box = el.closest('.select__container');
+    const ctl = box.querySelector('.select__control');
+    const vc = box.querySelector('.select__value-container');
+    let menu = null, timers = [];
+    const stop = () => { timers.forEach(clearTimeout); timers = []; };
+    const close = () => {
+      stop();
+      if (menu) { menu.remove(); menu = null; }
+      el.setAttribute('aria-expanded', 'false');
+    };
+    const notice = (kind, text) => {
+      const d = document.createElement('div');
+      d.className = 'select__menu-notice select__menu-notice--' + kind;
+      d.textContent = text;
+      return d;
+    };
+    const show = (items) => {
+      if (!menu) {
+        menu = document.createElement('div');
+        menu.className = 'select__menu';
+        box.appendChild(menu);
+      }
+      el.setAttribute('aria-expanded', 'true');
+      menu.innerHTML = '';
+      const list = document.createElement('div');
+      list.className = 'select__menu-list';
+      list.setAttribute('role', 'listbox');
+      items.forEach((t, i) => {
+        if (t instanceof Node) { list.appendChild(t); return; }
+        const o = document.createElement('div');
+        o.className = 'select__option';
+        o.setAttribute('role', 'option');
+        o.id = 'react-select-' + key + '-option-' + i;
+        o.textContent = t;
+        o.addEventListener('click', () => {
+          w.committed = t;
+          window.committed[key] = t;
+          el.value = '';
+          close();
+          let sv = vc.querySelector('.select__single-value');
+          if (!sv) {
+            sv = document.createElement('div');
+            sv.className = 'select__single-value';
+            vc.insertBefore(sv, vc.firstChild);
+          }
+          sv.textContent = t;
+          vc.classList.add('select__value-container--has-value');
+        });
+        list.appendChild(o);
+      });
+      menu.appendChild(list);
+    };
+    const render = () => {
+      stop();
+      const q = (el.value || '').trim().toLowerCase();
+      if (!w.remote) {
+        const hits = w.opts.filter(o => o.toLowerCase().includes(q));
+        show(hits.length ? hits : [notice('no-options', 'No options')]);
+        return;
+      }
+      if (!q) { show([notice('no-options', 'Type to search')]); return; }
+      show([notice('no-options', 'No options')]);
+      timers.push(setTimeout(() => show([notice('loading', 'Loading...')]), 250));
+      timers.push(setTimeout(() => {
+        const hits = CATALOGUE.filter(o => o.toLowerCase().includes(q));
+        show(hits.length ? hits : [notice('no-options', 'No options')]);
+      }, 750));
+    };
+    ctl.addEventListener('mousedown', (e) => { if (!menu) render(); });
+    el.addEventListener('input', render);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close();
+      if (e.key === 'ArrowDown' && !menu) render();
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -97,6 +97,7 @@ SUITES = (
     'test_long_form_listing',
     'test_linkedin_question_step',
     'test_ashby_location',
+    'test_greenhouse_select_notice',
 )
 LEGACY_BROWSER = {
     'test_upload_stale_node', 'test_form_filler', 'test_live_failure_replay',
@@ -120,6 +121,7 @@ SELF_ISOLATED = {
     'test_long_form_listing',
     'test_linkedin_question_step',
     'test_ashby_location',
+    'test_greenhouse_select_notice',
 }
 UNITTEST_SUITES = {'test_clicker', 'test_upload_stability', 'test_field_clear',
                    'test_workday_click_filter', 'test_workday_create_account'}
