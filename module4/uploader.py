@@ -657,6 +657,29 @@ def find_file_inputs(cdp_url: str, hint: str = "") -> list[UploadTarget]:
     return found
 
 
+# Is `el` behind an open modal? True when a rendered dialog/modal covers at
+# least half the viewport and no rendered dialog holds `el`: every click on it
+# lands on the modal. Paylocity (2521) opens an "Apply with resume" Bootstrap
+# modal over its form; both the modal and the form behind it have a hidden
+# resume input and an "Upload Resume"-style button, and only the modal's are
+# reachable.
+_BEHIND_MODAL = "__behind_modal__"
+_BEHIND_MODAL_JS = r"""(el) => {
+  const W = innerWidth, H = innerHeight;
+  const within = (m, n) => { for (; n; n = n.parentElement || (n.getRootNode && n.getRootNode().host)) if (n === m) return true; return false; };
+  let big = false;
+  for (const m of document.querySelectorAll('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open],.modal')) {
+    const cs = getComputedStyle(m);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    const r = m.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    if (within(m, el)) return false;
+    const w = Math.min(r.right, W) - Math.max(r.left, 0), h = Math.min(r.bottom, H) - Math.max(r.top, 0);
+    if (w > 0 && h > 0 && w * h >= 0.5 * W * H) big = true;
+  }
+  return big;
+}"""
+
 _CONTEXT_JS = r"""function(){
   const bits = [];
   let n = this.parentElement;
@@ -670,9 +693,10 @@ _CONTEXT_JS = r"""function(){
   if (this.labels) for (const l of this.labels) bits.push((l.innerText || '').slice(0, 80));
   const sib = this.parentElement && this.parentElement.querySelector('button, [role=button]');
   if (sib) bits.push((sib.innerText || sib.getAttribute('aria-label') || '').slice(0, 60));
+  const behind = (""" + _BEHIND_MODAL_JS + r""")(this) ? ' """ + _BEHIND_MODAL + r"""' : '';
   const r = this.getBoundingClientRect();
   const vis = r.width > 0 && r.height > 0 ? ' __rendered__' : '';
-  return bits.join(' ').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 400) + vis;
+  return bits.join(' ').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 400) + behind + vis;
 }"""
 
 
@@ -1040,6 +1064,14 @@ def _select(targets: list[UploadTarget], filename: str, want: str, hint: str) ->
         if len(rendered) == 1:
             chosen, ties = rendered[0], rendered
     if len(ties) > 1:
+        # Paylocity (2521): hidden input#btn-forceResume in the open "Apply
+        # with resume" modal, hidden input#btn-resume in the form behind it.
+        # The page takes the resume through the modal only; the one behind
+        # it cannot be reached until the modal is gone.
+        front = [t for t in ties if _BEHIND_MODAL not in t.context]
+        if 0 < len(front) < len(ties):
+            chosen, ties = front[0], front
+    if len(ties) > 1:
         # SmartRecruiters (Fieldfare 1375): two identical shadow inputs, one
         # in the "Easy Apply" autofill dropzone, one in the "Resume" section.
         # Their only difference is outside the shadow root. Pick the one whose
@@ -1378,9 +1410,11 @@ _CHOOSER_CONTROLS_JS = r"""function(want, hint){
   const slot = el => { for (let n = el, k = 0; n && k < 6; n = n.parentElement, k++) {
     const t = norm(n.innerText || n.textContent); if (t && t.length < 600 && (KIND.resume.test(t) || KIND.cover.test(t))) return [t, k]; } return ['', 9]; };
   const hintToks = norm(hint).split(/[^a-z0-9]+/).filter(t => t.length > 2);
+  // A control behind an open modal only clicks the modal (Paylocity 2521).
+  const behind = """ + _BEHIND_MODAL_JS + r""";
   let found = [];
   for (const el of document.querySelectorAll('button, [role=button], a, [onclick], input[type=button], label')) {
-    if (!vis(el) || el.disabled) continue;
+    if (!vis(el) || el.disabled || behind(el)) continue;
     const o = own(el);
     if (NEVER.test(o) || !UPLOADISH.test(o)) continue;
     const [st, depth] = slot(el);
