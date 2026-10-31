@@ -218,6 +218,39 @@ _PAGE_NOT_SEEN = re.compile(
     re.I,
 )
 
+# An apply link that only ever opens the employer's whole job board, where
+# nothing marks which posting is this job (job 3481, 2026-10-31: a JobDiva ?a=
+# link landed on a 465-job search board holding several postings with the
+# same title). Closed: no attempt can reach a posting it cannot name. Both
+# halves must be there; a board where the agent can still find the job is not
+# this.
+_GENERIC_BOARD = re.compile(
+    r"(?:never|not|only|just)\b[^.;]{0,120}?\b(?:generic|general|company-wide|whole|full|all[- ]jobs?)\b"
+    r"[^.;]{0,40}?\b(?:job |jobs |search |career |careers )?(?:board|search|listings?|job list|careers? (?:page|site))\b",
+    re.I,
+)
+_POSTING_UNIDENTIFIABLE = re.compile(
+    r"no way to (?:identify|tell|know|determine|pick) which|"
+    r"(?:could not|cannot|can'?t|unable to) (?:identify|tell|determine) which",
+    re.I,
+)
+
+# The employer's own eligibility screen turns the candidate away: work
+# authorization / sponsorship pre-screen questions, answered truthfully, end
+# the application at once (job 3480, 2026-10-31: auto-rejected before the
+# main form with only "Thank you for your interest."). A knockout, not a
+# broken form: every attempt gives the same true answers. Trouble setting the
+# answer (a sponsorship dropdown that will not keep its value) is not this.
+_ELIGIBILITY_SCREEN = re.compile(
+    r"work authori[sz]ation|sponsorship|right to work|legally (?:authori[sz]ed|eligible)",
+    re.I,
+)
+_KNOCKOUT = re.compile(
+    r"auto-?reject|knock(?:ed)?[- ]?out|disqualif|screened (?:me |the candidate )?out|"
+    r"reject(?:s|ed)? (?:the candidate |the application |it )?(?:at once|immediately|instantly)",
+    re.I,
+)
+
 # The employer's own server cannot be reached (job 2451: the employer's job page
 # printed "Failed to connect to <backend> port 443" on 25 Oct and again on
 # 30 Oct; still so the same night). One run's failure is a temporary outage
@@ -297,7 +330,8 @@ def permanent_reason(status: str | None, detail: str | None) -> str | None:
 
 def dead_listing_reason(status: str | None, detail: str | None, url: str | None = None,
                         *, previous: str | None = None) -> str | None:
-    """A short reason when a stuck attempt really met a listing that is gone.
+    """A short reason when a stuck attempt really met a listing that is gone,
+    or one that is shut to this candidate (an eligibility knockout).
 
     previous: the job's stored module4_last_status from its last run, when
     the attempt being judged is a new one.
@@ -307,6 +341,10 @@ def dead_listing_reason(status: str | None, detail: str | None, url: str | None 
     d = detail or ""
     if _NO_WAY_TO_APPLY.search(d) and not _PAGE_NOT_SEEN.search(d):
         return "job page has no apply form, button or email address"
+    if _GENERIC_BOARD.search(d) and _POSTING_UNIDENTIFIABLE.search(d):
+        return "apply link opens only a generic job board, with no way to identify the posting"
+    if _ELIGIBILITY_SCREEN.search(d) and _KNOCKOUT.search(d):
+        return "employer's eligibility screen rejects the candidate (work authorization / sponsorship)"
     prev_status, _, prev_detail = (previous or "").partition(":")
     if prev_status.strip().lower() == "stuck" and (
         _unreachable_hosts(d) & _unreachable_hosts(prev_detail)

@@ -218,6 +218,27 @@ APPLY_PATH_NOT_SEEN = [
     "No apply button found; the Apply link opens an external ATS that needs sign-in",
     "no apply form or button found on the listing",
 ]
+# GHO-118: verbatim from jobs 3481 and 3480 (run 2026-10-31 22:00), employers
+# and the candidate's nationality pseudonymised. A link that only reaches a whole job board, and an
+# eligibility pre-screen that turns the candidate away: closed, not retried.
+GENERIC_BOARD = ("JobDiva apply link (a= token) never resolved to a specific job detail/apply page, only to "
+                 "Contoso's generic 465-job search board; multiple same-titled \"Full Stack Developer\" postings "
+                 "exist there with no way to identify which is job_id 3481")
+KNOCKOUT = ("Fabrikam's screening questions (US work authorization / sponsorship, both truthfully answered No/Yes "
+            "for a non-US candidate) auto-reject before the main form, showing only \"Thank you for your "
+            "interest.\" with no path to continue")
+NOT_SHUT = [
+    # A board the agent can still search, a board it never saw.
+    "Apply link opened the generic careers page; searched for the title and found the posting, but Submit stayed disabled",
+    "Apply link only opens the generic job board because the posting iframe did not load",
+    # Stored 128 and 1456: trouble SETTING a sponsorship answer, retryable.
+    "Form is ~95% filled (resume/cover letter uploaded, all required Yes/No and location fields set) but the "
+    "visa-sponsorship dropdown kept failing to persist",
+    "Ran out of tool iterations while re-driving Ashby's custom Yes/No and radio widgets via CDP keyboard events; "
+    "visa-sponsorship \"No\" was not yet confirmed checked, and final Submit was not successfully re-clicked",
+    # A rejection that is not the eligibility screen.
+    "Workday rejected the application immediately because the resume upload failed validation",
+]
 # Permanent only while email apply is off (GHO-67); otherwise the retry lets
 # the agent report it as `email_apply`.
 NO_WEB_FORM = ("stuck", "Apply flow has no web form; \"Apply Now\" is a mailto:careers@quillonpub.com link only")
@@ -257,6 +278,12 @@ def test_blockers():
     check("no apply form ... only from a stuck verdict", blockers.dead_listing_reason("failed", NO_WAY_TO_APPLY) is None)
     for detail in APPLY_PATH_NOT_SEEN:
         check(f"not a dead listing: {detail[:50]}...", blockers.dead_listing_reason("stuck", detail) is None,
+              repr(blockers.dead_listing_reason("stuck", detail)))
+    check("link to a generic board, posting unidentifiable -> closed",
+          blockers.dead_listing_reason("stuck", GENERIC_BOARD) is not None)
+    check("eligibility pre-screen knockout -> closed", blockers.dead_listing_reason("stuck", KNOCKOUT) is not None)
+    for detail in NOT_SHUT:
+        check(f"not shut: {detail[:50]}...", blockers.dead_listing_reason("stuck", detail) is None,
               repr(blockers.dead_listing_reason("stuck", detail)))
     check("stored status form parsed",
           blockers.permanent_reason_from_last_status("captcha_failed:hCaptcha grid") is not None)
@@ -520,6 +547,33 @@ def test_runner_controls():
               and rows[32].module4_attempts == 0, f"{rows[32].module4_outcome} attempts={rows[32].module4_attempts}")
         check("stored no-way-to-apply stuck -> closed without an agent",
               33 not in spawned and rows[33].module4_outcome == "closed", f"{rows[33].module4_outcome}")
+    finally:
+        session.close()
+        os.unlink(db)
+
+    # GHO-118: a link that never reaches the posting and an eligibility
+    # knockout close after the attempt that met them, uncharged, and close
+    # without an agent when already stored as stuck (jobs 3481, 3480).
+    session, db = make_session()
+    try:
+        add_job(session, 40, url="https://www1.jobdiva.com/candidates/myjobs/searchjobs.jsp?a=XYZ")
+        add_job(session, 41, attempts=1, last_status=f"stuck:{GENERIC_BOARD}")
+        add_job(session, 42, url="https://fabrikam.hrmdirect.example/employment/job-opening.php?req=1")
+        add_job(session, 43, attempts=1, last_status=f"stuck:{KNOCKOUT}")
+        outcomes = {
+            40: Outcome(status="stuck", detail=GENERIC_BOARD),
+            42: Outcome(status="stuck", detail=KNOCKOUT),
+        }
+        result, spawned = run_with(session, outcomes)
+        rows = {j.id: j for j in session.query(JobModel).all()}
+        for jid, what in ((40, "generic board"), (42, "eligibility knockout")):
+            check(f"{what} -> closed, no attempt charged",
+                  rows[jid].module4_outcome == "closed" and rows[jid].should_apply is False
+                  and rows[jid].module4_attempts == 0,
+                  f"{rows[jid].module4_outcome} attempts={rows[jid].module4_attempts}")
+        for jid, what in ((41, "generic board"), (43, "eligibility knockout")):
+            check(f"stored {what} stuck -> closed without an agent",
+                  jid not in spawned and rows[jid].module4_outcome == "closed", f"{rows[jid].module4_outcome}")
     finally:
         session.close()
         os.unlink(db)
